@@ -72,6 +72,12 @@
 #include "spandsp/private/power_meter.h"
 #include "spandsp/private/v17rx.h"
 
+#if defined(SPANDSP_USE_FIXED_POINT)
+#if !defined(SPANDSP_USE_FIXED_POINTx) 
+#define SPANDSP_USE_FIXED_POINTx
+#endif
+#endif
+
 #if defined(SPANDSP_USE_FIXED_POINTx)
 #define FP_SCALE(x)                     FP_Q6_10(x)
 #define FP_FACTOR                       1024
@@ -455,6 +461,7 @@ static int decode_baud(v17_rx_state_t *s, complexf_t *z)
     float new_distances[8];
     float min;
 #endif
+    int space_map = s->space_map; 
 
 #if defined(SPANDSP_USE_FIXED_POINTx)
     re = (z->re + FP_CONSTELLATION_SCALE(9.0f)) >> (FP_CONSTELLATION_SHIFT_FACTOR - 1);
@@ -494,9 +501,45 @@ static int decode_baud(v17_rx_state_t *s, complexf_t *z)
     min = 9999999.0f;
 #endif
     min_index = 0;
+    if (space_map > 3 || space_map < 0) {
+       space_map = 0;
+    }
     for (i = 0;  i < 8;  i++)
     {
-        nearest = constel_maps[s->space_map][re][im][i];
+	nearest = constel_maps[space_map][re][im][i];
+	if (nearest < 0) {
+		nearest = 0;
+	}
+	switch (s->bits_per_symbol)
+	{
+	case 6:
+	    if (nearest >= 128) {
+		    nearest = 127;
+	    }
+	    break;
+	case 5:
+	    if (nearest >= 64) {
+		    nearest = 63;
+	    }
+	    break;
+	case 4:
+	    if (nearest >= 32) {
+		    nearest = 31;
+	    }
+	    break;
+	case 3:
+	    if (nearest >= 16) {
+		    nearest = 15;
+	    }
+	    break;
+	case 2:
+	    if (nearest >= 4) {
+		    nearest = 3;
+	    }
+	    break;
+	default:
+	    nearest = 0;
+	}
 #if defined(SPANDSP_USE_FIXED_POINTx)
         ci = complex_seti32(s->constellation[nearest].re*DIST_FACTOR,
                             s->constellation[nearest].im*DIST_FACTOR);
@@ -1609,6 +1652,7 @@ SPAN_DECLARE(v17_rx_state_t *) v17_rx_init(v17_rx_state_t *s, int bit_rate, put_
     s->scrambler_tap = 18 - 1;
     v17_rx_signal_cutoff(s, -45.5f);
     s->carrier_phase_rate_save = DDS_PHASE_RATE(CARRIER_NOMINAL_FREQ);
+    s->bit_rate = bit_rate;
     v17_rx_restart(s, bit_rate, s->short_train);
     return s;
 }
