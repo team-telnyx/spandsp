@@ -1282,7 +1282,7 @@ static int process_rx_data(t38_core_state_t *t, void *user_data, int data_type, 
            of the incrementing sequence numbers. We need to filter them here in a context sensitive manner. */
         if (t->current_rx_data_type != data_type  ||  t->current_rx_field_type != field_type)
         {
-            if (hdlc_buf->contents != (data_type | FLAG_DATA))
+            if (t->current_rx_data_type != data_type && hdlc_buf->contents != (data_type | FLAG_DATA))
             {
                 queue_missing_indicator(s, data_type);
                 hdlc_buf = &s->core.hdlc_to_modem.buf[s->core.hdlc_to_modem.in];
