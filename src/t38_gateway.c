@@ -1284,9 +1284,25 @@ static int process_rx_data(t38_core_state_t *t, void *user_data, int data_type, 
         {
             if (t->current_rx_data_type != data_type && hdlc_buf->contents != (data_type | FLAG_DATA))
             {
+                span_log(&s->logging,
+                    SPAN_LOG_DEBUG,
+                    "T38_FIELD_HDLC_SIG_END current data type didn't match %d!=%d (%d!=%d)\n",
+                    t->current_rx_data_type,
+                    data_type,
+                    hdlc_buf->contents,
+                    (data_type | FLAG_DATA));
                 queue_missing_indicator(s, data_type);
                 hdlc_buf = &s->core.hdlc_to_modem.buf[s->core.hdlc_to_modem.in];
+            } else if (t->current_rx_data_type == data_type && hdlc_buf->contents != (data_type | FLAG_DATA)) {
+                span_log(&s->logging,
+                    SPAN_LOG_WARNING,
+                    "T38_FIELD_HDLC_SIG_END current data type match but not hdlc content %d==%d (%d!=%d)\n",
+                    t->current_rx_data_type,
+                    data_type,
+                    hdlc_buf->contents,
+                    (data_type | FLAG_DATA));
             }
+            
             /*endif*/
             /* WORKAROUND: At least some Mediatrix boxes have a bug, where they can send this message at the
                            end of non-ECM data. We need to tolerate this. */
