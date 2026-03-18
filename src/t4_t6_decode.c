@@ -240,6 +240,8 @@ static int put_decoded_row(t4_t6_decode_state_t *s)
                 for (i += (8 - s->pixels);  i >= 8;  i -= 8)
                 {
                     s->pixels = 8;
+                    if (row_pos >= s->bytes_per_row)
+                        break;
                     s->row_buf[row_pos++] = (uint8_t) s->pixel_stream;
                     s->pixel_stream = fudge;
                 }
@@ -785,19 +787,31 @@ SPAN_DECLARE(int) t4_t6_decode_restart(t4_t6_decode_state_t *s, int image_width)
     int bytes_per_row;
     int run_space;
     uint32_t *bufptr;
+    uint32_t *bufptr2;
     uint8_t *bufptr8;
+
+    /* Validate image_width to prevent integer overflow and insane allocations.
+       Max fax width is 4864 pixels (A3 at superfine), use 32768 as safe upper bound. */
+    if (image_width <= 0  ||  image_width > 32768)
+        return -1;
 
     /* Calculate the scanline/tile width. */
     run_space = (image_width + 4)*sizeof(uint32_t);
     if (s->bytes_per_row == 0  ||  image_width != s->image_width)
     {
-        /* Allocate the space required for decoding the new row length. */
+        /* Allocate the space required for decoding the new row length.
+           Do both allocations before updating state to avoid partial updates on failure. */
         if ((bufptr = (uint32_t *) span_realloc(s->cur_runs, run_space)) == NULL)
             return -1;
-        s->cur_runs = bufptr;
-        if ((bufptr = (uint32_t *) span_realloc(s->ref_runs, run_space)) == NULL)
+        if ((bufptr2 = (uint32_t *) span_realloc(s->ref_runs, run_space)) == NULL)
+        {
+            /* ref_runs alloc failed - cur_runs may have moved, but that's okay
+               since bufptr still points to valid memory. Restore consistency. */
+            s->cur_runs = bufptr;
             return -1;
-        s->ref_runs = bufptr;
+        }
+        s->cur_runs = bufptr;
+        s->ref_runs = bufptr2;
         s->image_width = image_width;
     }
     bytes_per_row = (image_width + 7)/8;

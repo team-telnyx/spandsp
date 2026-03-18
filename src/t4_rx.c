@@ -1246,19 +1246,35 @@ static int tiff_row_write_handler(void *user_data, const uint8_t buf[], size_t l
 {
     t4_rx_state_t *s;
     uint8_t *t;
+    int new_size;
+    int grow_size;
 
     s = (t4_rx_state_t *) user_data;
     if (buf  &&  len > 0)
     {
-        if (s->tiff.image_size + len >= s->tiff.image_buffer_size)
+        /* Sanity check: len should never be huge (max row is ~4KB for widest fax) */
+        if (len > 65536)
+            return -1;
+
+        /* Check for integer overflow before arithmetic */
+        if (s->tiff.image_size > INT_MAX - (int)len)
+            return -1;
+
+        new_size = s->tiff.image_size + (int)len;
+        if (new_size >= s->tiff.image_buffer_size)
         {
-            if ((t = span_realloc(s->tiff.image_buffer, s->tiff.image_buffer_size + 100*len)) == NULL)
+            /* Safe growth calculation */
+            grow_size = (int)len * 100;
+            if (grow_size < (int)len  ||  s->tiff.image_buffer_size > INT_MAX - grow_size)
                 return -1;
-            s->tiff.image_buffer_size += 100*len;
+
+            if ((t = span_realloc(s->tiff.image_buffer, s->tiff.image_buffer_size + grow_size)) == NULL)
+                return -1;
+            s->tiff.image_buffer_size += grow_size;
             s->tiff.image_buffer = t;
         }
         memcpy(&s->tiff.image_buffer[s->tiff.image_size], buf, len);
-        s->tiff.image_size += len;
+        s->tiff.image_size = new_size;
     }
     return 0;
 }
