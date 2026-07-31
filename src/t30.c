@@ -2241,6 +2241,12 @@ static int analyze_rx_dcs(t30_state_t *s, const uint8_t *msg, int len)
     }
     /*endif*/
 
+    /* Clamp the frame length to the maximum we can handle before using it, so the
+       string formatting and copy below cannot overflow their fixed-size buffers. */
+    if (len > T30_MAX_DIS_DTC_DCS_LEN)
+        len = T30_MAX_DIS_DTC_DCS_LEN;
+    /*endif*/
+
     /* Make an ASCII string format copy of the message, for logging in the
        received file. This string does not include the frame header octets. */
     sprintf(s->rx_dcs_string, "%02X", bit_reverse8(msg[3]));
@@ -2250,9 +2256,6 @@ static int analyze_rx_dcs(t30_state_t *s, const uint8_t *msg, int len)
 
     /* Make a local copy of the message, padded to the maximum possible length with zeros. This allows
        us to simply pick out the bits, without worrying about whether they were set from the remote side. */
-    if (len > T30_MAX_DIS_DTC_DCS_LEN)
-        len = T30_MAX_DIS_DTC_DCS_LEN;
-    /*endif*/
     memcpy(dcs_frame, msg, len);
     if (len < T30_MAX_DIS_DTC_DCS_LEN)
         memset(dcs_frame + len, 0, T30_MAX_DIS_DTC_DCS_LEN - len);
