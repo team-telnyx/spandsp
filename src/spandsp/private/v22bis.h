@@ -55,9 +55,10 @@ enum
 enum
 {
     V22BIS_TX_TRAINING_STAGE_NORMAL_OPERATION = 0,
-    V22BIS_TX_TRAINING_STAGE_INITIAL_TIMED_SILENCE,
-    V22BIS_TX_TRAINING_STAGE_INITIAL_SILENCE,
+    V22BIS_TX_TRAINING_STAGE_INITIAL_SILENCE,           /* Initial calling side state */
+    V22BIS_TX_TRAINING_STAGE_INITIAL_TIMED_SILENCE,     /* Initial V,22bis answering side state */
     V22BIS_TX_TRAINING_STAGE_U11,
+    V22BIS_TX_TRAINING_STAGE_U00,                       /* A special feature for testing purposes. */
     V22BIS_TX_TRAINING_STAGE_U0011,
     V22BIS_TX_TRAINING_STAGE_S11,
     V22BIS_TX_TRAINING_STAGE_TIMED_S11,
@@ -79,18 +80,20 @@ struct v22bis_state_s
 {
     /*! \brief The maximum permitted bit rate of the modem. Valid values are 1200 and 2400. */
     int bit_rate;
-    /*! \brief True is this is the calling side modem. */
+    /*! \brief Guard tone and sundry flags */
+    int options;
+    /*! \brief True if this is the calling side modem. */
     bool calling_party;
     /*! \brief The callback function used to get the next bit to be transmitted. */
-    get_bit_func_t get_bit;
+    span_get_bit_func_t get_bit;
     /*! \brief A user specified opaque pointer passed to the get_bit callback routine. */
     void *get_bit_user_data;
     /*! \brief The callback function used to put each bit received. */
-    put_bit_func_t put_bit;
+    span_put_bit_func_t put_bit;
     /*! \brief A user specified opaque pointer passed to the put_bit callback routine. */
     void *put_bit_user_data;
     /*! \brief The callback function used to report modem status changes. */
-    modem_status_func_t status_handler;
+    span_modem_status_func_t status_handler;
     /*! \brief A user specified opaque pointer passed to the status function. */
     void *status_user_data;
 
@@ -238,9 +241,9 @@ struct v22bis_state_s
         /*! \brief The update rate for the phase of the carrier (i.e. the DDS increment). */
         int32_t carrier_phase_rate;
         /*! \brief The current phase of the guard tone (i.e. the DDS parameter). */
-        uint32_t guard_phase;
+        uint32_t guard_tone_phase;
         /*! \brief The update rate for the phase of the guard tone (i.e. the DDS increment). */
-        int32_t guard_phase_rate;
+        int32_t guard_tone_phase_rate;
         /*! \brief The current fractional phase of the baud timing. */
         int baud_phase;
         /*! \brief The code number for the current position in the constellation. */
@@ -248,7 +251,7 @@ struct v22bis_state_s
         /*! \brief An indicator to mark that we are tidying up to stop transmission. */
         int shutdown;
         /*! \brief The get_bit function in use at any instant. */
-        get_bit_func_t current_get_bit;
+        span_get_bit_func_t current_get_bit;
     } tx;
 
     /*! \brief Error and flow logging control */

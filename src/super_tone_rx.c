@@ -57,13 +57,25 @@
 #include "spandsp/private/super_tone_rx.h"
 
 #if defined(SPANDSP_USE_FIXED_POINT)
-#define DETECTION_THRESHOLD         16439           /* -42dBm0 [((SUPER_TONE_BINS*SUPER_TONE_BINS*32768.0/(1.4142*128.0))*10^((-42 - DBM0_MAX_SINE_POWER)/20.0))^2] */
-#define TONE_TWIST                  4               /* 6dB */
-#define TONE_TO_TOTAL_ENERGY        64              /* -3dB */
+#if defined(SPANDSP_USE_INTRINSICS_IN_INITIALIZERS)
+static const int detection_threshold        = energy_threshold_dbm0(SUPER_TONE_BINS, -42);
+static const int tone_twist                 = 4;
+static const int tone_to_total_energy       = SUPER_TONE_BINS*64;
 #else
-#define DETECTION_THRESHOLD         2104205.6f      /* -42dBm0 [((SUPER_TONE_BINS*SUPER_TONE_BINS*32768.0/1.4142)*10^((-42 - DBM0_MAX_SINE_POWER)/20.0))^2] */
-#define TONE_TWIST                  3.981f          /* 6dB */
-#define TONE_TO_TOTAL_ENERGY        1.995f          /* 3dB */
+static const int detection_threshold        = 16439;            /* -42dBm0 */
+static const int tone_twist                 = 4;                /* 6dB */
+static const int tone_to_total_energy       = 64;               /* -3dB */
+#endif
+#else
+#if defined(SPANDSP_USE_INTRINSICS_IN_INITIALIZERS)
+static const float detection_threshold      = energy_threshold_dbm0(SUPER_TONE_BINS, -42);
+static const float tone_twist               = db_to_power_ratio(6.0f);
+static const float tone_to_total_energy     = SUPER_TONE_BINS*db_to_power_ratio(-3.0f);
+#else
+static const float detection_threshold      = 2104205.6f;       /* -42dBm0 */
+static const float tone_twist               = 3.981f;           /* 6dB */
+static const float tone_to_total_energy     = 1.995f;           /* 3dB */
+#endif
 #endif
 
 static int add_super_tone_freq(super_tone_rx_descriptor_t *desc, int freq)
@@ -72,12 +84,15 @@ static int add_super_tone_freq(super_tone_rx_descriptor_t *desc, int freq)
 
     if (freq == 0)
         return -1;
+    /*endif*/
     /* Look for an existing frequency */
     for (i = 0;  i < desc->used_frequencies;  i++)
     {
         if (desc->pitches[i][0] == freq)
             return desc->pitches[i][1];
+        /*endif*/
     }
+    /*endfor*/
     /* Look for an existing tone which is very close. We may need to merge
        the detectors. */
     for (i = 0;  i < desc->used_frequencies;  i++)
@@ -91,13 +106,16 @@ static int add_super_tone_freq(super_tone_rx_descriptor_t *desc, int freq)
             desc->used_frequencies++;
             return desc->pitches[i][1];
         }
+        /*endif*/
     }
+    /*endfor*/
     desc->pitches[i][0] = freq;
     desc->pitches[i][1] = desc->monitored_frequencies;
     if (desc->monitored_frequencies%5 == 0)
     {
         desc->desc = (goertzel_descriptor_t *) span_realloc(desc->desc, (desc->monitored_frequencies + 5)*sizeof(goertzel_descriptor_t));
     }
+    /*endif*/
     make_goertzel_descriptor(&desc->desc[desc->monitored_frequencies++], (float) freq, SUPER_TONE_BINS);
     desc->used_frequencies++;
     return desc->pitches[i][1];
@@ -111,6 +129,7 @@ SPAN_DECLARE(int) super_tone_rx_add_tone(super_tone_rx_descriptor_t *desc)
         desc->tone_list = (super_tone_rx_segment_t **) span_realloc(desc->tone_list, (desc->tones + 5)*sizeof(super_tone_rx_segment_t *));
         desc->tone_segs = (int *) span_realloc(desc->tone_segs, (desc->tones + 5)*sizeof(int));
     }
+    /*endif*/
     desc->tone_list[desc->tones] = NULL;
     desc->tone_segs[desc->tones] = 0;
     desc->tones++;
@@ -132,6 +151,7 @@ SPAN_DECLARE(int) super_tone_rx_add_element(super_tone_rx_descriptor_t *desc,
     {
         desc->tone_list[tone] = (super_tone_rx_segment_t *) span_realloc(desc->tone_list[tone], (step + 5)*sizeof(super_tone_rx_segment_t));
     }
+    /*endif*/
     desc->tone_list[tone][step].f1 = add_super_tone_freq(desc, f1);
     desc->tone_list[tone][step].f2 = add_super_tone_freq(desc, f2);
     desc->tone_list[tone][step].min_duration = min*8;
@@ -147,13 +167,14 @@ static int test_cadence(super_tone_rx_segment_t *pattern,
                         int rotation)
 {
     int i;
-    int j = 0;
+    int j;
 
     if (rotation >= 0)
     {
         /* Check only for the sustaining of a tone in progress. This means
            we only need to check each block if the latest step is compatible
            with the tone template. */
+        j = 0;
         if (steps < 0)
         {
             /* A -ve value for steps indicates we just changed step, and need to
@@ -163,19 +184,25 @@ static int test_cadence(super_tone_rx_segment_t *pattern,
             j = (rotation + steps - 2)%steps;
             if (pattern[j].f1 != test[8].f1  ||  pattern[j].f2 != test[8].f2)
                 return 0;
+            /*endif*/
             if (pattern[j].min_duration > test[8].min_duration*SUPER_TONE_BINS
                 ||
                 pattern[j].max_duration < test[8].min_duration*SUPER_TONE_BINS)
             {
                 return 0;
             }
+            /*endif*/
         }
-        if (steps) 
+        /*endif*/
+        if (steps)
             j = (rotation + steps - 1)%steps;
+        /*endif*/
         if (pattern[j].f1 != test[9].f1  ||  pattern[j].f2 != test[9].f2)
             return 0;
+        /*endif*/
         if (pattern[j].max_duration < test[9].min_duration*SUPER_TONE_BINS)
             return 0;
+        /*endif*/
     }
     else
     {
@@ -185,14 +212,18 @@ static int test_cadence(super_tone_rx_segment_t *pattern,
             j = i + 10 - steps;
             if (pattern[i].f1 != test[j].f1  ||  pattern[i].f2 != test[j].f2)
                 return 0;
+            /*endif*/
             if (pattern[i].min_duration > test[j].min_duration*SUPER_TONE_BINS
                 ||
                 pattern[i].max_duration < test[j].min_duration*SUPER_TONE_BINS)
             {
                 return 0;
             }
+            /*endif*/
         }
+        /*endfor*/
     }
+    /*endif*/
     return 1;
 }
 /*- End of function --------------------------------------------------------*/
@@ -203,7 +234,9 @@ SPAN_DECLARE(super_tone_rx_descriptor_t *) super_tone_rx_make_descriptor(super_t
     {
         if ((desc = (super_tone_rx_descriptor_t *) span_alloc(sizeof(*desc))) == NULL)
             return NULL;
+        /*endif*/
     }
+    /*endif*/
     desc->tone_list = NULL;
     desc->tone_segs = NULL;
 
@@ -225,86 +258,31 @@ SPAN_DECLARE(int) super_tone_rx_free_descriptor(super_tone_rx_descriptor_t *desc
         {
             if (desc->tone_list[i])
                 span_free(desc->tone_list[i]);
+            /*endif*/
         }
+        /*endfor*/
         if (desc->tone_list)
             span_free(desc->tone_list);
+        /*endif*/
         if (desc->tone_segs)
             span_free(desc->tone_segs);
+        /*endif*/
         if (desc->desc)
             span_free(desc->desc);
+        /*endif*/
         span_free(desc);
     }
+    /*endif*/
     return 0;
 }
 /*- End of function --------------------------------------------------------*/
 
 SPAN_DECLARE(void) super_tone_rx_tone_callback(super_tone_rx_state_t *s,
-                                               tone_report_func_t callback,
+                                               span_tone_report_func_t callback,
                                                void *user_data)
 {
     s->tone_callback = callback;
     s->callback_data = user_data;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(void) super_tone_rx_segment_callback(super_tone_rx_state_t *s,
-                                                  tone_segment_func_t callback)
-{
-    s->segment_callback = callback;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(super_tone_rx_state_t *) super_tone_rx_init(super_tone_rx_state_t *s,
-                                                         super_tone_rx_descriptor_t *desc,
-                                                         tone_report_func_t callback,
-                                                         void *user_data)
-{
-    int i;
-
-    if (desc == NULL)
-        return NULL;
-    if (callback == NULL)
-        return NULL;
-    if (s == NULL)
-    {
-        if ((s = (super_tone_rx_state_t *) span_alloc(sizeof(*s) + desc->monitored_frequencies*sizeof(goertzel_state_t))) == NULL)
-            return NULL;
-    }
-
-    for (i = 0;  i < 11;  i++)
-    {
-        s->segments[i].f1 = -1;
-        s->segments[i].f2 = -1;
-        s->segments[i].min_duration = 0;
-    }
-    s->segment_callback = NULL;
-    s->tone_callback = callback;
-    s->callback_data = user_data;
-    if (desc)
-        s->desc = desc;
-    s->detected_tone = -1;
-#if defined(SPANDSP_USE_FIXED_POINT)
-    s->energy = 0;
-#else
-    s->energy = 0.0f;
-#endif
-    for (i = 0;  i < desc->monitored_frequencies;  i++)
-        goertzel_init(&s->state[i], &s->desc->desc[i]);
-    return s;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(int) super_tone_rx_release(super_tone_rx_state_t *s)
-{
-    return 0;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(int) super_tone_rx_free(super_tone_rx_state_t *s)
-{
-    if (s)
-        span_free(s);
-    return 0;
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -315,59 +293,78 @@ static void super_tone_chunk(super_tone_rx_state_t *s)
     int k1;
     int k2;
 #if defined(SPANDSP_USE_FIXED_POINT)
-    int32_t res[SUPER_TONE_BINS/2] = {0};
+    int32_t res[SUPER_TONE_BINS/2];
 #else
-    float res[SUPER_TONE_BINS/2] = {0};
+    float res[SUPER_TONE_BINS/2];
 #endif
 
-    for (i = 0;  i < s->desc->monitored_frequencies;  i++)
-        res[i] = goertzel_result(&s->state[i]);
-    /* Find our two best monitored frequencies, which also have adequate energy. */
-    if (s->energy < DETECTION_THRESHOLD)
+    if (s->energy < detection_threshold)
     {
+        /* The total energy is too low to be considered a tone detection. */
         k1 = -1;
         k2 = -1;
+        for (i = 0;  i < s->desc->monitored_frequencies;  i++)
+            goertzel_reset(&s->state[i]);
+        /*endfor*/
     }
     else
     {
-        if (res[0] > res[1])
+        if (s->desc->monitored_frequencies < 2)
         {
-            k1 = 0;
-            k2 = 1;
+            k1 =
+            k2 = 0;
         }
         else
         {
-            k1 = 1;
-            k2 = 0;
-        }
-        for (j = 2;  j < s->desc->monitored_frequencies;  j++)
-        {
-            if (res[j] >= res[k1])
+            /* Find our two best monitored frequencies, which also have adequate energy. */
+            for (i = 0;  i < s->desc->monitored_frequencies;  i++)
+                res[i] = goertzel_result(&s->state[i]);
+            /*endfor*/
+            if (res[0] > res[1])
             {
-                k2 = k1;
-                k1 = j;
+                k1 = 0;
+                k2 = 1;
             }
-            else if (res[j] >= res[k2])
+            else
             {
+                k1 = 1;
+                k2 = 0;
+            }
+            /*endif*/
+            for (j = 2;  j < s->desc->monitored_frequencies;  j++)
+            {
+                if (res[j] >= res[k1])
+                {
+                    k2 = k1;
+                    k1 = j;
+                }
+                else if (res[j] >= res[k2])
+                {
+                    k2 = j;
+                }
+                /*endif*/
+            }
+            /*endfor*/
+            if ((res[k1] + res[k2]) < tone_to_total_energy*s->energy)
+            {
+                k1 = -1;
+                k2 = -1;
+            }
+            else if (res[k1] > tone_twist*res[k2])
+            {
+                k2 = -1;
+            }
+            else if (k2 < k1)
+            {
+                j = k1;
+                k1 = k2;
                 k2 = j;
             }
+            /*endif*/
         }
-        if ((res[k1] + res[k2]) < TONE_TO_TOTAL_ENERGY*s->energy)
-        {
-            k1 = -1;
-            k2 = -1;
-        }
-        else if (res[k1] > TONE_TWIST*res[k2])
-        {
-            k2 = -1;
-        }
-        else if (k2 < k1)
-        {
-            j = k1;
-            k1 = k2;
-            k2 = j;
-        }
+        /*endif*/
     }
+    /*endif*/
     /* See if this differs from last time. */
     if (k1 != s->segments[10].f1  ||  k2 != s->segments[10].f2)
     {
@@ -393,7 +390,9 @@ static void super_tone_chunk(super_tone_rx_state_t *s)
                     s->detected_tone = -1;
                     s->tone_callback(s->callback_data, s->detected_tone, -10, 0);
                 }
+                /*endif*/
             }
+            /*endif*/
             if (s->segment_callback)
             {
                 s->segment_callback(s->callback_data,
@@ -401,6 +400,7 @@ static void super_tone_chunk(super_tone_rx_state_t *s)
                                     s->segments[9].f2,
                                     s->segments[9].min_duration*SUPER_TONE_BINS/8);
             }
+            /*endif*/
             memmove(&s->segments[0], &s->segments[1], 9*sizeof(s->segments[0]));
             s->segments[9].f1 = k1;
             s->segments[9].f2 = k2;
@@ -418,10 +418,14 @@ static void super_tone_chunk(super_tone_rx_state_t *s)
                     s->detected_tone = -1;
                     s->tone_callback(s->callback_data, s->detected_tone, -10, 0);
                 }
+                /*endif*/
             }
+            /*endif*/
             s->segments[9].min_duration++;
         }
+        /*endif*/
     }
+    /*endif*/
     if (s->detected_tone < 0)
     {
         /* Test for the start of any of the monitored tone patterns */
@@ -434,8 +438,11 @@ static void super_tone_chunk(super_tone_rx_state_t *s)
                 s->tone_callback(s->callback_data, s->detected_tone, -10, 0);
                 break;
             }
+            /*endif*/
         }
+        /*endfor*/
     }
+    /*endif*/
 #if defined(SPANDSP_USE_FIXED_POINT)
     s->energy = 0;
 #else
@@ -459,7 +466,8 @@ SPAN_DECLARE(int) super_tone_rx(super_tone_rx_state_t *s, const int16_t amp[], i
     for (sample = 0;  sample < samples;  sample += x)
     {
         for (i = 0;  i < s->desc->monitored_frequencies;  i++)
-            x = goertzel_update(&s->state[i], amp + sample, samples - sample);
+            x = goertzel_update(&s->state[i], &amp[sample], samples - sample);
+        /*endfor*/
         for (i = 0;  i < x;  i++)
         {
             xamp = goertzel_preadjust_amp(amp[sample + i]);
@@ -469,17 +477,15 @@ SPAN_DECLARE(int) super_tone_rx(super_tone_rx_state_t *s, const int16_t amp[], i
             s->energy += xamp*xamp;
 #endif
         }
+        /*endfor*/
         if (s->state[0].current_sample >= SUPER_TONE_BINS)
         {
             /* We have finished a Goertzel block. */
             super_tone_chunk(s);
-#if defined(SPANDSP_USE_FIXED_POINT)
-            s->energy = 0;
-#else
-            s->energy = 0.0f;
-#endif
         }
+        /*endif*/
     }
+    /*endfor*/
     return samples;
 }
 /*- End of function --------------------------------------------------------*/
@@ -487,6 +493,75 @@ SPAN_DECLARE(int) super_tone_rx(super_tone_rx_state_t *s, const int16_t amp[], i
 SPAN_DECLARE(int) super_tone_rx_fillin(super_tone_rx_state_t *s, int samples)
 {
     /* TODO: Roll the detector forward without a state change */
+    return 0;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(void) super_tone_rx_segment_callback(super_tone_rx_state_t *s,
+                                                  tone_segment_func_t callback)
+{
+    s->segment_callback = callback;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(super_tone_rx_state_t *) super_tone_rx_init(super_tone_rx_state_t *s,
+                                                         super_tone_rx_descriptor_t *desc,
+                                                         span_tone_report_func_t callback,
+                                                         void *user_data)
+{
+    int i;
+
+    if (desc == NULL)
+        return NULL;
+    /*endif*/
+    if (callback == NULL)
+        return NULL;
+    /*endif*/
+    if (s == NULL)
+    {
+        if ((s = (super_tone_rx_state_t *) span_alloc(sizeof(*s) + desc->monitored_frequencies*sizeof(goertzel_state_t))) == NULL)
+            return NULL;
+        /*endif*/
+    }
+    /*endif*/
+
+    for (i = 0;  i < 11;  i++)
+    {
+        s->segments[i].f1 = -1;
+        s->segments[i].f2 = -1;
+        s->segments[i].min_duration = 0;
+    }
+    /*endfor*/
+    s->segment_callback = NULL;
+    s->tone_callback = callback;
+    s->callback_data = user_data;
+    if (desc)
+        s->desc = desc;
+    /*endif*/
+    s->detected_tone = -1;
+#if defined(SPANDSP_USE_FIXED_POINT)
+    s->energy = 0;
+#else
+    s->energy = 0.0f;
+#endif
+    for (i = 0;  i < desc->monitored_frequencies;  i++)
+        goertzel_init(&s->state[i], &s->desc->desc[i]);
+    /*endfor*/
+    return s;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(int) super_tone_rx_release(super_tone_rx_state_t *s)
+{
+    return 0;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(int) super_tone_rx_free(super_tone_rx_state_t *s)
+{
+    if (s)
+        span_free(s);
+    /*endif*/
     return 0;
 }
 /*- End of function --------------------------------------------------------*/

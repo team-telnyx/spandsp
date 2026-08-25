@@ -151,6 +151,11 @@ struct t30_state_s
     /*! \brief An opaque pointer passed to the document delivery handler. */
     void *document_put_user_data;
 
+    /*! \brief The maximum permitted number of retries of a single command allowed. */
+    int max_command_tries;
+    /*! \brief The maximum permitted number of retries of a single response request allowed. */
+    int max_response_tries;
+
     /*! \brief The DIS code for the minimum scan row time we require. This is usually 0ms,
         but if we are trying to simulate another type of FAX machine, we may need a non-zero
         value here. */
@@ -213,22 +218,22 @@ struct t30_state_s
         Placing calls is handled outside the FAX processing, but this timeout keeps
         running until V.21 modulation is sent or received.
         T1 is the remote terminal identification timeout (in audio samples). */
-    int timer_t0_t1;
+    span_sample_timer_t timer_t0_t1;
     /*! \brief T2, T2A and T2B are the HDLC command timeouts.
                T4, T4A and T4B are the HDLC response timeouts (in audio samples). */
-    int timer_t2_t4;
+    span_sample_timer_t timer_t2_t4;
     /*! \brief A value specifying which of the possible timers is currently running in timer_t2_t4 */
     int timer_t2_t4_is;
     /*! \brief Procedural interrupt timeout (in audio samples). */
-    int timer_t3;
+    span_sample_timer_t timer_t3;
     /*! \brief This is only used in error correcting mode. */
-    int timer_t5;
+    span_sample_timer_t timer_t5;
     /*! \brief This is only used in full duplex (e.g. ISDN) modes. */
-    int timer_t6;
+    span_sample_timer_t timer_t6;
     /*! \brief This is only used in full duplex (e.g. ISDN) modes. */
-    int timer_t7;
+    span_sample_timer_t timer_t7;
     /*! \brief This is only used in full duplex (e.g. ISDN) modes. */
-    int timer_t8;
+    span_sample_timer_t timer_t8;
 
     /*! \brief True once the far end FAX entity has been detected. */
     bool far_end_detected;
@@ -323,6 +328,11 @@ struct t30_state_s
     /*! \brief A count of successfully received ECM frames, to assess progress as a basis for
         deciding whether to continue error correction when PPRs keep repeating. */
     int ecm_progress;
+
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+    /*! \brief SSL Fax context. */
+    sslfax_state_t sslfax;
+#endif
 
     /*! \brief The number of RTP events */
     int rtp_events;

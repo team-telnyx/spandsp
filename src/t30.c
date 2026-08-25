@@ -59,6 +59,7 @@
 #include "spandsp/tone_generate.h"
 #include "spandsp/async.h"
 #include "spandsp/hdlc.h"
+#include "spandsp/ssl_fax.h"
 #include "spandsp/fsk.h"
 #include "spandsp/v29rx.h"
 #include "spandsp/v29tx.h"
@@ -79,9 +80,11 @@
 #include "spandsp/t30.h"
 #include "spandsp/t30_api.h"
 #include "spandsp/t30_logging.h"
+#include "spandsp/crc.h"
 
 #include "spandsp/private/logging.h"
 #include "spandsp/private/timezone.h"
+#include "spandsp/private/ssl_fax.h"
 #include "spandsp/private/t81_t82_arith_coding.h"
 #include "spandsp/private/t85.h"
 #include "spandsp/private/t42.h"
@@ -97,12 +100,12 @@
 #include "t30_local.h"
 
 /*! The maximum permitted number of retries of a single command allowed. */
-#define MAX_COMMAND_TRIES   6
+#define DEFAULT_MAX_COMMAND_TRIES   3
 
 /*! The maximum permitted number of retries of a single response request allowed. This
     is not specified in T.30. However, if you don't apply some limit a messed up FAX
     terminal could keep you retrying all day. Its a backstop protection. */
-#define MAX_RESPONSE_TRIES  6
+#define DEFAULT_MAX_RESPONSE_TRIES  6
 
 /* T.30 defines the following call phases:
    Phase A: Call set-up.
@@ -449,6 +452,11 @@ static void timer_t4_start(t30_state_t *s);
 static void timer_t4_flagged_start(t30_state_t *s);
 static void timer_t4_dropped_start(t30_state_t *s);
 static void timer_t2_t4_stop(t30_state_t *s);
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+static void t30_non_ecm_rx_status(void *user_data, int status);
+static void t30_hdlc_rx_status(void *user_data, int status);
+static int send_next_ecm_frame(t30_state_t *s);
+#endif
 
 /*! Test a specified bit within a DIS, DTC or DCS frame */
 #define test_ctrl_bit(s,bit) ((s)[3 + ((bit - 1)/8)] & (1 << ((bit - 1)%8)))
@@ -458,6 +466,120 @@ static void timer_t2_t4_stop(t30_state_t *s);
 #define set_ctrl_bits(s,val,bit) (s)[3 + ((bit - 1)/8)] |= ((val) << ((bit - 1)%8))
 /*! Clear a specified bit within a DIS, DTC or DCS frame */
 #define clr_ctrl_bit(s,bit) (s)[3 + ((bit - 1)/8)] &= ~(1 << ((bit - 1)%8))
+
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+static bool sslfax_enabled(t30_state_t *s)
+{
+    return ((s->iaf & T30_IAF_MODE_T37)  &&  (s->iaf & T30_IAF_MODE_T38));
+}
+/*- End of function --------------------------------------------------------*/
+
+static void sslfax_bitstuffing(t30_state_t *s, uint8_t byte, bool stuff)
+{
+    uint8_t buf[1];
+    unsigned int j;
+    uint16_t bit;
+
+    for (j = 0;  j < 8;  j++)
+    {
+        bit = ((byte & (1 << j)) != 0)  ?  1  :  0;
+        s->sslfax.ecm_byte |= (bit << s->sslfax.ecm_bitpos);
+        s->sslfax.ecm_bitpos++;
+        if (s->sslfax.ecm_bitpos == 8)
+        {
+            buf[0] = s->sslfax.ecm_byte;
+            sslfax_write(&s->sslfax, buf, 1, 0, 60000, true, false);
+            s->sslfax.ecm_bitpos = 0;
+            s->sslfax.ecm_byte = 0;
+        }
+        /*endif*/
+        /* Add transparent zero bits if needed */
+        if (bit == 1  &&  stuff)
+            s->sslfax.ecm_ones++;
+        else
+            s->sslfax.ecm_ones = 0;
+        /*endif*/
+        if (s->sslfax.ecm_ones == 5)
+        {
+            s->sslfax.ecm_bitpos++;
+            if (s->sslfax.ecm_bitpos == 8)
+            {
+                buf[0] = s->sslfax.ecm_byte;
+                sslfax_write(&s->sslfax, buf, 1, 0, 60000, true, false);
+                s->sslfax.ecm_bitpos = 0;
+                s->sslfax.ecm_byte = 0;
+            }
+            /*endif*/
+            s->sslfax.ecm_ones = 0;
+        }
+        /*endif*/
+    }
+    /*endfor*/
+}
+/*- End of function --------------------------------------------------------*/
+
+static void t30_sslfax_real_time_frame_handler(void *user_data, bool incoming, const uint8_t *msg, int len)
+{
+    int i;
+    t30_state_t *s;
+    uint8_t buf[len + 2];
+
+    s = (t30_state_t *) user_data;
+    if (s->sslfax.server)
+    {
+        if (!incoming)
+        {
+            memcpy(buf, msg, len);
+            len = crc_itu16_append(buf, len);
+
+            if (len > 2  &&  msg[0] == ADDRESS_FIELD  &&  msg[1] == CONTROL_FIELD_NON_FINAL_FRAME  &&  (msg[2] == T4_FCD  ||  msg[2] == T4_RCP))
+            {
+                /* Phase C data is a bitstream, and as such ECM data needs to be bitstuffed to separate the frames from
+                   each other with 0x7E deliniation bytes.  Thus, we need to process Phase C ECM data frames bit-by-bit.
+                   Perhaps it would be better to utilize the existing HDLC functions for this here, but the overhead to
+                   getting at those functions seems undue.  So, we just handle the bitstuffing here, separately. */
+                sslfax_bitstuffing(s, 0x7E, false);
+                for (i = 0;  i < len;  i++)
+                {
+                    sslfax_bitstuffing(s, buf[i], true);
+                }
+                /*endfor*/
+                if (msg[2] == T4_RCP)
+                {
+                    s->sslfax.rcp_count++;
+                    if (s->sslfax.rcp_count == 3)
+                    {
+                        s->sslfax.rcp_count = 0;
+                        sslfax_bitstuffing(s, 0x7E, false);
+                        buf[0] = 0x10;  /* DLE */
+                        buf[1] = 0x03;  /* ETX */
+                        sslfax_write(&s->sslfax, buf, 2, 0, 60000, false, false);
+                        s->sslfax.signal = 2;
+                        return;
+                    }
+                    /*endif*/
+                }
+                /*endif*/
+                s->sslfax.do_underflow = true;
+            }
+            else
+            {
+                sslfax_write(&s->sslfax, buf, len, 0, 60000, true, false);
+                buf[0] = 0x10;  /* DLE */
+                buf[1] = 0x03;  /* ETX */
+                sslfax_write(&s->sslfax, buf, 2, 0, 60000, false, false);
+                /* We need to trigger T30_FRONT_END_SEND_STEP_COMPLETE twice. We do that thusly... */
+                s->sslfax.signal = 2;
+            }
+            /*endif*/
+        }
+        /*endif*/
+    }
+    /*endif*/
+    return;
+}
+/*- End of function --------------------------------------------------------*/
+#endif
 
 static int find_fallback_entry(int dcs_code)
 {
@@ -779,6 +901,13 @@ static void release_resources(t30_state_t *s)
         s->rx_info.csa = NULL;
     }
     /*endif*/
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+    if (s->sslfax.server)
+    {
+        sslfax_cleanup(&s->sslfax, false);
+    }
+    /*endif*/
+#endif
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -1555,7 +1684,7 @@ static int prune_dis_dtc(t30_state_t *s)
     /* Find the last octet that is really needed, set the extension bits, and trim the message length */
     for (i = T30_MAX_DIS_DTC_DCS_LEN - 1;  i >= 6;  i--)
     {
-        /* Strip the top bit */
+        /* Strip the extension bit */
         s->local_dis_dtc_frame[i] &= (DISBIT1 | DISBIT2 | DISBIT3 | DISBIT4 | DISBIT5 | DISBIT6 | DISBIT7);
         /* Check if there is some real message content here */
         if (s->local_dis_dtc_frame[i])
@@ -1569,7 +1698,8 @@ static int prune_dis_dtc(t30_state_t *s)
     for (i--;  i > 4;  i--)
         s->local_dis_dtc_frame[i] |= DISBIT8;
     /*endfor*/
-    t30_decode_dis_dtc_dcs(s, s->local_dis_dtc_frame, s->local_dis_dtc_len);
+    t30_log_dis_dtc_dcs(&s->logging, s->local_dis_dtc_frame, s->local_dis_dtc_len);
+
     return s->local_dis_dtc_len;
 }
 /*- End of function --------------------------------------------------------*/
@@ -1610,6 +1740,15 @@ static int build_dcs(t30_state_t *s)
     /*endif*/
 #endif
 
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+    /* Check for SSL Fax. */
+    if (sslfax_enabled(s)  &&  test_ctrl_bit(s->far_dis_dtc_frame, T30_DIS_BIT_T37)  &&  test_ctrl_bit(s->far_dis_dtc_frame, T30_DIS_BIT_T38))
+    {
+        set_ctrl_bit(s->dcs_frame, T30_DCS_BIT_T37);
+        set_ctrl_bit(s->dcs_frame, T30_DCS_BIT_T38);
+    }
+    /*endif*/
+#endif
     /* Set to required modem rate */
     s->dcs_frame[4] |= fallback_sequence[s->current_fallback].dcs_code;
 
@@ -1834,14 +1973,14 @@ static int prune_dcs(t30_state_t *s)
     for (i--  ;  i > 4;  i--)
         s->dcs_frame[i] |= DISBIT8;
     /*endfor*/
-    t30_decode_dis_dtc_dcs(s, s->dcs_frame, s->dcs_len);
+    t30_log_dis_dtc_dcs(&s->logging, s->dcs_frame, s->dcs_len);
     return s->dcs_len;
 }
 /*- End of function --------------------------------------------------------*/
 
 static int analyze_rx_dis_dtc(t30_state_t *s, const uint8_t *msg, int len)
 {
-    t30_decode_dis_dtc_dcs(s, msg, len);
+    t30_log_dis_dtc_dcs(&s->logging, msg, len);
     if (len < 6)
     {
         span_log(&s->logging, SPAN_LOG_FLOW, "Short DIS/DTC frame\n");
@@ -2094,12 +2233,18 @@ static int analyze_rx_dcs(t30_state_t *s, const uint8_t *msg, int len)
     int i;
     int x;
 
-    t30_decode_dis_dtc_dcs(s, msg, len);
+    t30_log_dis_dtc_dcs(&s->logging, msg, len);
     if (len < 6)
     {
         span_log(&s->logging, SPAN_LOG_FLOW, "Short DCS frame\n");
         return -1;
     }
+    /*endif*/
+
+    /* Clamp the frame length to the maximum we can handle before using it, so the
+       string formatting and copy below cannot overflow their fixed-size buffers. */
+    if (len > T30_MAX_DIS_DTC_DCS_LEN)
+        len = T30_MAX_DIS_DTC_DCS_LEN;
     /*endif*/
 
     /* Make an ASCII string format copy of the message, for logging in the
@@ -2111,9 +2256,6 @@ static int analyze_rx_dcs(t30_state_t *s, const uint8_t *msg, int len)
 
     /* Make a local copy of the message, padded to the maximum possible length with zeros. This allows
        us to simply pick out the bits, without worrying about whether they were set from the remote side. */
-    if (len > T30_MAX_DIS_DTC_DCS_LEN)
-        len = T30_MAX_DIS_DTC_DCS_LEN;
-    /*endif*/
     memcpy(dcs_frame, msg, len);
     if (len < T30_MAX_DIS_DTC_DCS_LEN)
         memset(dcs_frame + len, 0, T30_MAX_DIS_DTC_DCS_LEN - len);
@@ -2515,6 +2657,13 @@ static void send_dcn(t30_state_t *s)
     queue_phase(s, T30_PHASE_D_TX);
     set_state(s, T30_STATE_C);
     send_simple_frame(s, T30_DCN);
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+    if (s->sslfax.server)
+    {
+        sslfax_cleanup(&s->sslfax, false);
+    }
+    /*endif*/
+#endif
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -2523,7 +2672,7 @@ static void return_to_phase_b(t30_state_t *s, int with_fallback)
     /* This is what we do after things like T30_EOM is exchanged. */
     span_log(&s->logging, SPAN_LOG_PROTOCOL_WARNING, "Returning to phase B\n");
     /* Run the T1 timer, like we do on first detecting the far end. */
-    s->timer_t0_t1 = ms_to_samples(DEFAULT_TIMER_T1);
+    s->timer_t0_t1 = milliseconds_to_samples(DEFAULT_TIMER_T1);
     set_state(s, (s->calling_party)  ?  T30_STATE_T  :  T30_STATE_R);
 }
 /*- End of function --------------------------------------------------------*/
@@ -3573,14 +3722,25 @@ static void process_rx_fcd(t30_state_t *s, const uint8_t *msg, int len)
     int frame_no;
 
     /* Facsimile coded data */
+    if (len < 4)
+    {
+        span_log(&s->logging, SPAN_LOG_FLOW, "Bad length for FCD frame - %d\n", len);
+        /* This frame didn't get corrupted in transit, because its CRC is OK. It was sent bad
+           and there is little possibility that causing a retransmission will help. It is best
+           to just give up. */
+        t30_set_status(s, T30_ERR_TX_ECMPHD);
+        terminate_call(s);
+        return;
+    }
+    /*endif*/
     switch (s->state)
     {
     case T30_STATE_F_DOC_ECM:
         if (len > 4 + 256)
         {
-            /* For other frame types we kill the call on an unexpected frame length. For FCD frames it is better to just ignore
-               the frame, and let retries sort things out. */
-            span_log(&s->logging, SPAN_LOG_FLOW, "Unexpected %s frame length - %d\n", t30_frametype(msg[0]), len);
+            /* For other frame types we kill the call on an unexpected frame length. For FCD frames it is
+               better to just ignore an overly long frame, and let retries sort things out. */
+            span_log(&s->logging, SPAN_LOG_FLOW, "Unexpected FCD frame length - %d\n", len);
         }
         else
         {
@@ -3913,7 +4073,7 @@ static void process_state_d_post_tcf(t30_state_t *s, const uint8_t *msg, int len
         break;
     case T30_DIS:
         /* It appears they didn't see what we sent - retry the TCF */
-        if (++s->retries >= MAX_COMMAND_TRIES)
+        if (++s->retries >= s->max_command_tries)
         {
             span_log(&s->logging, SPAN_LOG_FLOW, "Too many retries. Giving up.\n");
             t30_set_status(s, T30_ERR_RETRYDCN);
@@ -4522,7 +4682,7 @@ static void process_state_ii_q(t30_state_t *s, const uint8_t *msg, int len)
             if (s->phase_d_handler)
             {
                 s->phase_d_handler(s->phase_d_user_data, fcf);
-                s->timer_t3 = ms_to_samples(DEFAULT_TIMER_T3);
+                s->timer_t3 = milliseconds_to_samples(DEFAULT_TIMER_T3);
             }
             /*endif*/
         }
@@ -4629,7 +4789,7 @@ static void process_state_ii_q(t30_state_t *s, const uint8_t *msg, int len)
             if (s->phase_d_handler)
             {
                 s->phase_d_handler(s->phase_d_user_data, fcf);
-                s->timer_t3 = ms_to_samples(DEFAULT_TIMER_T3);
+                s->timer_t3 = milliseconds_to_samples(DEFAULT_TIMER_T3);
             }
             /*endif*/
         }
@@ -4707,6 +4867,9 @@ static void process_state_ii_q(t30_state_t *s, const uint8_t *msg, int len)
             }
             else
             {
+                if (s->tx_page_number == 0)
+                    t30_set_status(s, T30_ERR_RETRYDCN);
+                /*endif*/
                 send_dcn(s);
             }
             /*endif*/
@@ -4903,7 +5066,7 @@ static void process_state_iv_pps_null(t30_state_t *s, const uint8_t *msg, int le
         break;
     case T30_RNR:
         if (s->timer_t5 == 0)
-            s->timer_t5 = ms_to_samples(DEFAULT_TIMER_T5);
+            s->timer_t5 = milliseconds_to_samples(DEFAULT_TIMER_T5);
         /*endif*/
         queue_phase(s, T30_PHASE_D_TX);
         set_state(s, T30_STATE_IV_PPS_RNR);
@@ -4953,7 +5116,7 @@ static void process_state_iv_pps_q(t30_state_t *s, const uint8_t *msg, int len)
             if (s->phase_d_handler)
             {
                 s->phase_d_handler(s->phase_d_user_data, fcf);
-                s->timer_t3 = ms_to_samples(DEFAULT_TIMER_T3);
+                s->timer_t3 = milliseconds_to_samples(DEFAULT_TIMER_T3);
             }
             /*endif*/
         }
@@ -5025,7 +5188,7 @@ static void process_state_iv_pps_q(t30_state_t *s, const uint8_t *msg, int len)
         break;
     case T30_RNR:
         if (s->timer_t5 == 0)
-            s->timer_t5 = ms_to_samples(DEFAULT_TIMER_T5);
+            s->timer_t5 = milliseconds_to_samples(DEFAULT_TIMER_T5);
         /*endif*/
         queue_phase(s, T30_PHASE_D_TX);
         set_state(s, T30_STATE_IV_PPS_RNR);
@@ -5064,7 +5227,7 @@ static void process_state_iv_pps_q(t30_state_t *s, const uint8_t *msg, int len)
             if (s->phase_d_handler)
             {
                 s->phase_d_handler(s->phase_d_user_data, fcf);
-                s->timer_t3 = ms_to_samples(DEFAULT_TIMER_T3);
+                s->timer_t3 = milliseconds_to_samples(DEFAULT_TIMER_T3);
             }
             /*endif*/
         }
@@ -5094,7 +5257,7 @@ static void process_state_iv_pps_rnr(t30_state_t *s, const uint8_t *msg, int len
             if (s->phase_d_handler)
             {
                 s->phase_d_handler(s->phase_d_user_data, fcf);
-                s->timer_t3 = ms_to_samples(DEFAULT_TIMER_T3);
+                s->timer_t3 = milliseconds_to_samples(DEFAULT_TIMER_T3);
             }
             /*endif*/
         }
@@ -5166,7 +5329,7 @@ static void process_state_iv_pps_rnr(t30_state_t *s, const uint8_t *msg, int len
         break;
     case T30_RNR:
         if (s->timer_t5 == 0)
-            s->timer_t5 = ms_to_samples(DEFAULT_TIMER_T5);
+            s->timer_t5 = milliseconds_to_samples(DEFAULT_TIMER_T5);
         /*endif*/
         queue_phase(s, T30_PHASE_D_TX);
         set_state(s, T30_STATE_IV_PPS_RNR);
@@ -5201,7 +5364,7 @@ static void process_state_iv_pps_rnr(t30_state_t *s, const uint8_t *msg, int len
             if (s->phase_d_handler)
             {
                 s->phase_d_handler(s->phase_d_user_data, fcf);
-                s->timer_t3 = ms_to_samples(DEFAULT_TIMER_T3);
+                s->timer_t3 = milliseconds_to_samples(DEFAULT_TIMER_T3);
             }
             /*endif*/
         }
@@ -5256,7 +5419,7 @@ static void process_state_iv_eor(t30_state_t *s, const uint8_t *msg, int len)
     {
     case T30_RNR:
         if (s->timer_t5 == 0)
-            s->timer_t5 = ms_to_samples(DEFAULT_TIMER_T5);
+            s->timer_t5 = milliseconds_to_samples(DEFAULT_TIMER_T5);
         /*endif*/
         queue_phase(s, T30_PHASE_D_TX);
         set_state(s, T30_STATE_IV_EOR_RNR);
@@ -5281,7 +5444,7 @@ static void process_state_iv_eor(t30_state_t *s, const uint8_t *msg, int len)
             if (s->phase_d_handler)
             {
                 s->phase_d_handler(s->phase_d_user_data, fcf);
-                s->timer_t3 = ms_to_samples(DEFAULT_TIMER_T3);
+                s->timer_t3 = milliseconds_to_samples(DEFAULT_TIMER_T3);
             }
             /*endif*/
         }
@@ -5305,7 +5468,7 @@ static void process_state_iv_eor_rnr(t30_state_t *s, const uint8_t *msg, int len
     {
     case T30_RNR:
         if (s->timer_t5 == 0)
-            s->timer_t5 = ms_to_samples(DEFAULT_TIMER_T5);
+            s->timer_t5 = milliseconds_to_samples(DEFAULT_TIMER_T5);
         /*endif*/
         queue_phase(s, T30_PHASE_D_TX);
         set_state(s, T30_STATE_IV_EOR_RNR);
@@ -5334,7 +5497,7 @@ static void process_state_iv_eor_rnr(t30_state_t *s, const uint8_t *msg, int len
             if (s->phase_d_handler)
             {
                 s->phase_d_handler(s->phase_d_user_data, fcf);
-                s->timer_t3 = ms_to_samples(DEFAULT_TIMER_T3);
+                s->timer_t3 = milliseconds_to_samples(DEFAULT_TIMER_T3);
             }
             /*endif*/
         }
@@ -5728,7 +5891,7 @@ static void set_phase(t30_state_t *s, int phase)
         if (!s->far_end_detected  &&  s->timer_t0_t1 > 0)
         {
             /* Switch from T0 to T1 */
-            s->timer_t0_t1 = ms_to_samples(DEFAULT_TIMER_T1);
+            s->timer_t0_t1 = milliseconds_to_samples(DEFAULT_TIMER_T1);
             s->far_end_detected = true;
         }
         /*endif*/
@@ -5832,7 +5995,7 @@ static void repeat_last_command(t30_state_t *s)
     /* If T0 or T1 are in progress we do not want to apply a limit to the maximum number of retries. We
        let T0 or T1 terminate things if the far end doesn't communicate. */
     s->retries++;
-    if (s->timer_t0_t1 == 0  &&  s->retries >= MAX_COMMAND_TRIES)
+    if (s->timer_t0_t1 == 0  &&  s->retries >= s->max_command_tries)
     {
         span_log(&s->logging, SPAN_LOG_FLOW, "Too many retries. Giving up.\n");
         switch (s->state)
@@ -5857,7 +6020,7 @@ static void repeat_last_command(t30_state_t *s)
         return;
     }
     /*endif*/
-    span_log(&s->logging, SPAN_LOG_FLOW, "Retry number %d\n", s->retries);
+    span_log(&s->logging, SPAN_LOG_FLOW, "Command reattempt number %d\n", s->retries);
     switch (s->state)
     {
     case T30_STATE_R:
@@ -5928,7 +6091,7 @@ static void repeat_last_command(t30_state_t *s)
 static void timer_t2_start(t30_state_t *s)
 {
     span_log(&s->logging, SPAN_LOG_FLOW, "Start T2\n");
-    s->timer_t2_t4 = ms_to_samples(DEFAULT_TIMER_T2);
+    s->timer_t2_t4 = milliseconds_to_samples(DEFAULT_TIMER_T2);
     s->timer_t2_t4_is = TIMER_IS_T2;
 }
 /*- End of function --------------------------------------------------------*/
@@ -5941,13 +6104,13 @@ static void timer_t2_flagged_start(t30_state_t *s)
     if (s->phase == T30_PHASE_C_ECM_RX)
     {
         span_log(&s->logging, SPAN_LOG_FLOW, "Start T1A\n");
-        s->timer_t2_t4 = ms_to_samples(DEFAULT_TIMER_T1A);
+        s->timer_t2_t4 = milliseconds_to_samples(DEFAULT_TIMER_T1A);
         s->timer_t2_t4_is = TIMER_IS_T1A;
     }
     else
     {
         span_log(&s->logging, SPAN_LOG_FLOW, "Start T2-flagged\n");
-        s->timer_t2_t4 = ms_to_samples(DEFAULT_TIMER_T2_FLAGGED);
+        s->timer_t2_t4 = milliseconds_to_samples(DEFAULT_TIMER_T2_FLAGGED);
         s->timer_t2_t4_is = TIMER_IS_T2_FLAGGED;
     }
     /*endif*/
@@ -5957,7 +6120,7 @@ static void timer_t2_flagged_start(t30_state_t *s)
 static void timer_t2_dropped_start(t30_state_t *s)
 {
     span_log(&s->logging, SPAN_LOG_FLOW, "Start T2-dropped\n");
-    s->timer_t2_t4 = ms_to_samples(DEFAULT_TIMER_T2_DROPPED);
+    s->timer_t2_t4 = milliseconds_to_samples(DEFAULT_TIMER_T2_DROPPED);
     s->timer_t2_t4_is = TIMER_IS_T2_DROPPED;
 }
 /*- End of function --------------------------------------------------------*/
@@ -5965,7 +6128,7 @@ static void timer_t2_dropped_start(t30_state_t *s)
 static void timer_t4_start(t30_state_t *s)
 {
     span_log(&s->logging, SPAN_LOG_FLOW, "Start T4\n");
-    s->timer_t2_t4 = ms_to_samples(DEFAULT_TIMER_T4);
+    s->timer_t2_t4 = milliseconds_to_samples(DEFAULT_TIMER_T4);
     s->timer_t2_t4_is = TIMER_IS_T4;
 }
 /*- End of function --------------------------------------------------------*/
@@ -5973,7 +6136,7 @@ static void timer_t4_start(t30_state_t *s)
 static void timer_t4_flagged_start(t30_state_t *s)
 {
     span_log(&s->logging, SPAN_LOG_FLOW, "Start T4-flagged\n");
-    s->timer_t2_t4 = ms_to_samples(DEFAULT_TIMER_T4_FLAGGED);
+    s->timer_t2_t4 = milliseconds_to_samples(DEFAULT_TIMER_T4_FLAGGED);
     s->timer_t2_t4_is = TIMER_IS_T4_FLAGGED;
 }
 /*- End of function --------------------------------------------------------*/
@@ -5981,7 +6144,7 @@ static void timer_t4_flagged_start(t30_state_t *s)
 static void timer_t4_dropped_start(t30_state_t *s)
 {
     span_log(&s->logging, SPAN_LOG_FLOW, "Start T4-dropped\n");
-    s->timer_t2_t4 = ms_to_samples(DEFAULT_TIMER_T4_DROPPED);
+    s->timer_t2_t4 = milliseconds_to_samples(DEFAULT_TIMER_T4_DROPPED);
     s->timer_t2_t4_is = TIMER_IS_T4_DROPPED;
 }
 /*- End of function --------------------------------------------------------*/
@@ -6094,7 +6257,7 @@ static void timer_t2_expired(t30_state_t *s)
                to proceed to phase B, and pretty much act like its the beginning of a call. */
             span_log(&s->logging, SPAN_LOG_FLOW, "Returning to phase B after %s\n", t30_frametype(s->next_rx_step));
             /* Run the T1 timer, like we do on first detecting the far end. */
-            s->timer_t0_t1 = ms_to_samples(DEFAULT_TIMER_T1);
+            s->timer_t0_t1 = milliseconds_to_samples(DEFAULT_TIMER_T1);
             s->dis_received = false;
             set_phase(s, T30_PHASE_B_TX);
             timer_t2_start(s);
@@ -6259,7 +6422,7 @@ static void decode_url_msg(t30_state_t *s, char *msg, const uint8_t *pkt, int le
     if (msg == NULL)
         msg = text;
     /*endif*/
-    if (len < 3  ||  len > 77 + 3  ||  len != pkt[2] + 3)
+    if (len < 4  ||  len > 77 + 4  ||  len != pkt[3] + 4)
     {
         unexpected_frame_length(s, pkt, len);
         msg[0] = '\0';
@@ -6282,10 +6445,24 @@ static void decode_url_msg(t30_state_t *s, char *msg, const uint8_t *pkt, int le
        Third octet is the length of the internet address
             Bit 7 = 1 for more follows, 0 for last packet in the sequence.
             Bits 6-0 = length
+
+       Example SSL Fax URL (CSA):
+            FLOW T.30 Rx:  ff 03 24 00 02 25 73 73 6c 3a 2f 2f 73 38 56 36 71 37 61 74 31 42 40 5b 31 39 32 2e 31 36 38 2e 30 2e 33 31 5d 3a 31 30 30 30 30
+            FLOW T.30 Remote fax gave CSA as: 0, 2, "ssl://s8V6q7at1B@[192.168.0.31]:10000"
      */
-    memcpy(msg, &pkt[3], len - 3);
-    msg[len - 3] = '\0';
-    span_log(&s->logging, SPAN_LOG_FLOW, "Remote fax gave %s as: %d, %d, \"%s\"\n", t30_frametype(pkt[0]), pkt[0], pkt[1], msg);
+    memcpy(msg, &pkt[4], len - 4);
+    msg[len - 4] = '\0';
+    span_log(&s->logging, SPAN_LOG_FLOW, "Remote fax gave %s as: %d, %d, \"%s\"\n", t30_frametype(pkt[0]), pkt[1], pkt[2], msg);
+
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+    if (sslfax_enabled(s)  &&  pkt[2] == 0x02  &&  len > 10  &&  strncmp(msg, "ssl://", 6) == 0)
+    {
+        /* Looks like the remote offers SSL Fax service. */
+        s->sslfax.url = span_alloc(len - 9);
+        memcpy(s->sslfax.url, msg + 6, len - 9);
+    }
+    /*endif*/
+#endif
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -6336,6 +6513,23 @@ static void t30_non_ecm_rx_status(void *user_data, int status)
         switch (s->state)
         {
         case T30_STATE_F_TCF:
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+            if (sslfax_enabled(s)  &&  s->sslfax.url  &&  !s->sslfax.server)
+            {
+                /* SSL Fax can completely ignore TCF results. */
+                sslfax_start_client(&s->sslfax);
+                if (s->sslfax.server)
+                {
+                    /* SSL Fax uses the real-time frame handler */
+                    s->real_time_frame_handler = t30_sslfax_real_time_frame_handler;
+                    s->real_time_frame_user_data = s;
+                    s->current_status = T30_ERR_OK;
+                    was_trained = true;
+                }
+                /*endif*/
+            }
+            /*endif*/
+#endif
             /* Only respond if we managed to actually sync up with the source. We don't
                want to respond just because we saw a click. These often occur just
                before the real signal, with many modems. Presumably this is due to switching
@@ -6343,7 +6537,17 @@ static void t30_non_ecm_rx_status(void *user_data, int status)
                to the tail end of any slow modem signal. If there was a genuine data signal
                which we failed to train on it should not matter. If things are that bad, we
                do not stand much chance of good quality communications. */
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+            if (s->current_status != T30_ERR_OK)
+            {
+                /* We encountered some terminal problem in Phase B and will be sending DCN. */
+                queue_phase(s, T30_PHASE_D_TX);
+                set_state(s, T30_STATE_C);
+            }
+            else if (was_trained)
+#else
             if (was_trained)
+#endif
             {
                 /* Although T.30 says the training test should be 1.5s of all 0's, some FAX
                    machines send a burst of all 1's before the all 0's. Tolerate this. */
@@ -6351,7 +6555,11 @@ static void t30_non_ecm_rx_status(void *user_data, int status)
                     s->tcf_most_zeros = s->tcf_current_zeros;
                 /*endif*/
                 span_log(&s->logging, SPAN_LOG_FLOW, "Trainability (TCF) test result - %d total bits. longest run of zeros was %d\n", s->tcf_test_bits, s->tcf_most_zeros);
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+                if (!s->sslfax.server  &&  (s->tcf_most_zeros < fallback_sequence[s->current_fallback].bit_rate))
+#else
                 if (s->tcf_most_zeros < fallback_sequence[s->current_fallback].bit_rate)
+#endif
                 {
                     span_log(&s->logging, SPAN_LOG_FLOW, "Trainability (TCF) test failed - longest run of zeros was %d\n", s->tcf_most_zeros);
                     set_phase(s, T30_PHASE_B_TX);
@@ -6418,13 +6626,13 @@ SPAN_DECLARE(void) t30_non_ecm_put_bit(void *user_data, int bit)
     t30_state_t *s;
     int res;
 
+    s = (t30_state_t *) user_data;
     if (bit < 0)
     {
-        t30_non_ecm_rx_status(user_data, bit);
+        t30_non_ecm_rx_status(s, bit);
         return;
     }
     /*endif*/
-    s = (t30_state_t *) user_data;
     switch (s->state)
     {
     case T30_STATE_F_TCF:
@@ -6469,6 +6677,12 @@ SPAN_DECLARE(void) t30_non_ecm_put(void *user_data, const uint8_t buf[], int len
     int res;
 
     s = (t30_state_t *) user_data;
+    if (len < 0)
+    {
+        t30_non_ecm_rx_status(s, len);
+        return;
+    }
+    /*endif*/
     switch (s->state)
     {
     case T30_STATE_F_TCF:
@@ -6577,8 +6791,13 @@ SPAN_DECLARE(int) t30_non_ecm_get(void *user_data, uint8_t buf[], int max_len)
         len = 0;
         break;
     default:
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+        /* There was nothing to get at whatever point in the protocol we're at. This shouldn't be surprising. */
+        len = 0;
+#else
         span_log(&s->logging, SPAN_LOG_WARNING, "t30_non_ecm_get in bad state %s\n", state_names[s->state]);
         len = -1;
+#endif
         break;
     }
     /*endswitch*/
@@ -6624,6 +6843,29 @@ static void t30_hdlc_rx_status(void *user_data, int status)
         was_trained = s->rx_trained;
         s->rx_signal_present = false;
         s->rx_trained = false;
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+        if (sslfax_enabled(s)  &&  s->sslfax.url  &&  !s->sslfax.server  &&  (s->state == T30_STATE_I  ||  s->state == T30_STATE_IV))
+        {
+            sslfax_start_client(&s->sslfax);
+            if (s->sslfax.server)
+            {
+                /* SSL Fax uses the real-time frame handler */
+                s->real_time_frame_handler = t30_sslfax_real_time_frame_handler;
+                s->real_time_frame_user_data = s;
+                /* Reset the current ECM frame as the modem was preloaded with it */
+                s->ecm_current_tx_frame = 0;
+                s->ecm_frames_this_tx_burst = 0;
+                if (s->state == T30_STATE_IV)
+                {
+                    s->step = 0;
+                    s->sslfax.do_underflow = true;
+                }
+                /*endif*/
+            }
+            /*endif*/
+        }
+        /*endif*/
+#endif
         /* If a phase change has been queued to occur after the receive signal drops,
            its time to change. */
         if (s->state == T30_STATE_F_DOC_ECM)
@@ -6680,7 +6922,7 @@ static void t30_hdlc_rx_status(void *user_data, int status)
         if (!s->far_end_detected  &&  s->timer_t0_t1 > 0)
         {
             /* Switch from T0 to T1 */
-            s->timer_t0_t1 = ms_to_samples(DEFAULT_TIMER_T1);
+            s->timer_t0_t1 = milliseconds_to_samples(DEFAULT_TIMER_T1);
             s->far_end_detected = true;
             if (s->phase == T30_PHASE_A_CED  ||  s->phase == T30_PHASE_A_CNG)
                 set_phase(s, T30_PHASE_B_RX);
@@ -7319,7 +7561,7 @@ SPAN_DECLARE(int) t30_restart(t30_state_t *s, bool calling_party)
     s->local_interrupt_pending = false;
     s->far_end_detected = false;
     s->end_of_procedure_detected = false;
-    s->timer_t0_t1 = ms_to_samples(DEFAULT_TIMER_T0);
+    s->timer_t0_t1 = milliseconds_to_samples(DEFAULT_TIMER_T0);
     if (s->calling_party)
     {
         set_state(s, T30_STATE_T);
@@ -7332,6 +7574,12 @@ SPAN_DECLARE(int) t30_restart(t30_state_t *s, bool calling_party)
     }
     /*endif*/
     return 0;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(int) t30_call_active(t30_state_t *s)
+{
+    return (s->phase != T30_PHASE_CALL_FINISHED);
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -7378,8 +7626,17 @@ SPAN_DECLARE(t30_state_t *) t30_init(t30_state_t *s,
        get 1D and 2D encoding right. Quite a lot get other things wrong. */
     s->supported_output_compressions = T4_COMPRESSION_T4_2D | T4_COMPRESSION_JPEG;
     s->local_min_scan_time_code = T30_MIN_SCAN_0MS;
+    s->max_command_tries = DEFAULT_MAX_COMMAND_TRIES;
+    s->max_response_tries = DEFAULT_MAX_RESPONSE_TRIES;
     span_log_init(&s->logging, SPAN_LOG_NONE, NULL);
     span_log_set_protocol(&s->logging, "T.30");
+
+#if defined(SPANDSP_SUPPORT_SSLFAX)
+    /* Enable SSL Fax by default. */
+    s->iaf = T30_IAF_MODE_T37 | T30_IAF_MODE_T38;
+    sslfax_init(&s->sslfax);
+#endif
+
     t30_restart(s, calling_party);
     return s;
 }
@@ -7399,12 +7656,6 @@ SPAN_DECLARE(int) t30_free(t30_state_t *s)
     t30_release(s);
     span_free(s);
     return 0;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(int) t30_call_active(t30_state_t *s)
-{
-    return (s->phase != T30_PHASE_CALL_FINISHED);
 }
 /*- End of function --------------------------------------------------------*/
 /*- End of file ------------------------------------------------------------*/
