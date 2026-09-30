@@ -946,6 +946,22 @@ static int process_rx_indicator(t38_core_state_t *t, void *user_data, int indica
     /* We need to set this here, since we might have been called as a fake
        indication when the real one was missing */
     t->current_rx_indicator = indicator;
+    /* CNG never finishes by itself. Only HDLC preamble arriving from the modem side stops
+       it, and only if CNG is already running at that moment. If the preamble came first,
+       the change queued here would wait until the far modem sends preamble again. A new
+       signal from the T.38 side means its CNG is over, so stop ours now. */
+    if (s->t38x.in_progress_rx_indicator == T38_IND_CNG
+        &&
+        s->audio.modems.tx_handler == (span_tx_handler_t) &modem_connect_tones_tx
+        &&
+        indicator != T38_IND_NO_SIGNAL
+        &&
+        indicator != T38_IND_CNG)
+    {
+        span_log(&s->logging, SPAN_LOG_FLOW, "Stopping CNG for %s\n", t38_indicator_to_str(indicator));
+        set_next_tx_type(s);
+    }
+    /*endif*/
     return 0;
 }
 /*- End of function --------------------------------------------------------*/
