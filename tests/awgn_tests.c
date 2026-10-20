@@ -40,7 +40,7 @@
 #include "spandsp.h"
 
 #if !defined(M_PI)
-# define M_PI           3.14159265358979323846  /* pi */
+#define M_PI            3.14159265358979323846  /* pi */
 #endif
 
 #define OUT_FILE_NAME   "awgn.wav"
@@ -80,6 +80,7 @@ int main(int argc, char *argv[])
             printf("Failed to allocate AWGN source\n");
             exit(2);
         }
+        /*endif*/
         total_samples = 1000000;
         for (i = 0;  i < total_samples;  i++)
         {
@@ -88,8 +89,10 @@ int main(int argc, char *argv[])
                 clip_high++;
             else if (value == -32768)
                 clip_low++;
+            /*endif*/
             total += ((double) value)*((double) value);
         }
+        /*endfor*/
         error = 100.0*(1.0 - sqrt(total/total_samples)/noise_source->rms);
         printf("RMS = %.3f (expected %d) %.2f%% error [clipped samples %d+%d]\n",
                10.0*log10((total/total_samples)/(32768.0*32768.0) + 1.0e-10) + DBM0_MAX_POWER,
@@ -103,8 +106,10 @@ int main(int argc, char *argv[])
             printf("Test failed.\n");
             exit(2);
         }
+        /*endif*/
         awgn_free(noise_source);
     }
+    /*endfor*/
     /* Now look at the statistical spread of the results, by collecting data in
        bins from a large number of samples. Use a fairly high noise level, but
        low enough to avoid significant clipping. Use the Gaussian model to
@@ -117,6 +122,7 @@ int main(int argc, char *argv[])
         printf("Failed to allocate AWGN source\n");
         exit(2);
     }
+    /*endif*/
     total_samples = 10000000;
     for (i = 0;  i < total_samples;  i++)
     {
@@ -125,8 +131,10 @@ int main(int argc, char *argv[])
             clip_high++;
         else if (value == -32768)
             clip_low++;
+        /*endif*/
         bins[value + 32768]++;
     }
+    /*endfor*/
     o = noise_source->rms;
     for (i = 0;  i < 65536 - 10;  i++)
     {
@@ -138,11 +146,13 @@ int main(int argc, char *argv[])
         x = 0;
         for (j = 0;  j < 10;  j++)
             x += bins[i + j];
+        /*endfor*/
         x /= 10.0;
         x /= total_samples;
         /* Now send it out for graphing. */
         printf("%6d %.7f %.7f\n", i - 32768, x, p);
     }
+    /*endfor*/
     awgn_free(noise_source);
     printf("Tests passed.\n");
     return 0;

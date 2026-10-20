@@ -64,10 +64,12 @@
 #include "spandsp/dds.h"
 #include "spandsp/complex_filters.h"
 
+#include "spandsp/godard.h"
 #include "spandsp/v29rx.h"
 
 #include "spandsp/private/logging.h"
 #include "spandsp/private/power_meter.h"
+#include "spandsp/private/godard.h"
 #include "spandsp/private/v29rx.h"
 
 #if defined(SPANDSP_USE_FIXED_POINT)
@@ -78,22 +80,14 @@
 #define FP_SCALE(x)                     (x)
 #endif
 
-#if defined(SPANDSP_USE_FIXED_POINT)
-#define FP_SYNC_SCALE(x)                FP_Q6_10(x)
-#define FP_SYNC_SCALE_32(x)             FP_Q22_10(x)
-#define FP_SYNC_SHIFT_FACTOR            10
-#else
-#define FP_SYNC_SCALE(x)                (x)
-#define FP_SYNC_SCALE_32(x)             (x)
-#endif
-
 #define FP_CONSTELLATION_SCALE(x)       FP_SCALE(x)
 #if defined(SPANDSP_USE_FIXED_POINT)
 #define FP_CONSTELLATION_SHIFT_FACTOR   FP_SHIFT_FACTOR
 #endif
 
-#include "v29rx_rrc.h"
 #include "v29tx_constellation_maps.h"
+#include "v29rx_rrc.h"
+#include "v29rx_godard.h"
 
 /*! The nominal frequency of the carrier, in Hertz */
 #define CARRIER_NOMINAL_FREQ            1700.0f
@@ -109,23 +103,6 @@
 #define V29_TRAINING_SEG_3_LEN          384
 /*! The length of training segment 4, in symbols */
 #define V29_TRAINING_SEG_4_LEN          48
-
-/* Coefficients for the band edge symbol timing synchroniser (alpha = 0.99) */
-/* low_edge = 2.0f*M_PI*(CARRIER_NOMINAL_FREQ - BAUD_RATE/2.0f)/SAMPLE_RATE; */
-/* high_edge = 2.0f*M_PI*(CARRIER_NOMINAL_FREQ + BAUD_RATE/2.0f)/SAMPLE_RATE; */
-#define SIN_LOW_BAND_EDGE               0.382683432f
-#define COS_LOW_BAND_EDGE               0.923879533f
-#define SIN_HIGH_BAND_EDGE              0.760405966f
-#define COS_HIGH_BAND_EDGE             -0.649448048f
-#define ALPHA                           0.99f
-
-#define SYNC_LOW_BAND_EDGE_COEFF_0      FP_SYNC_SCALE(2.0f*ALPHA*COS_LOW_BAND_EDGE)
-#define SYNC_LOW_BAND_EDGE_COEFF_1      FP_SYNC_SCALE(-ALPHA*ALPHA)
-#define SYNC_LOW_BAND_EDGE_COEFF_2      FP_SYNC_SCALE(-ALPHA*SIN_LOW_BAND_EDGE)
-#define SYNC_HIGH_BAND_EDGE_COEFF_0     FP_SYNC_SCALE(2.0f*ALPHA*COS_HIGH_BAND_EDGE)
-#define SYNC_HIGH_BAND_EDGE_COEFF_1     FP_SYNC_SCALE(-ALPHA*ALPHA)
-#define SYNC_HIGH_BAND_EDGE_COEFF_2     FP_SYNC_SCALE(-ALPHA*SIN_HIGH_BAND_EDGE)
-#define SYNC_MIXED_EDGES_COEFF_3        FP_SYNC_SCALE(-ALPHA*ALPHA*(SIN_HIGH_BAND_EDGE*COS_LOW_BAND_EDGE - SIN_LOW_BAND_EDGE*COS_HIGH_BAND_EDGE))
 
 enum
 {
@@ -173,7 +150,7 @@ SPAN_DECLARE(float) v29_rx_carrier_frequency(v29_rx_state_t *s)
 
 SPAN_DECLARE(float) v29_rx_symbol_timing_correction(v29_rx_state_t *s)
 {
-    return (float) s->total_baud_timing_correction/((float) RX_PULSESHAPER_COEFF_SETS*10.0f/3.0f);
+    return (float) godard_ted_correction(&s->godard)/((float) RX_PULSESHAPER_COEFF_SETS*10.0f/3.0f);
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -183,7 +160,7 @@ SPAN_DECLARE(float) v29_rx_signal_power(v29_rx_state_t *s)
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(void) v29_rx_signal_cutoff(v29_rx_state_t *s, float cutoff)
+SPAN_DECLARE(void) v29_rx_set_signal_cutoff(v29_rx_state_t *s, float cutoff)
 {
     /* The 0.4 factor allows for the gain of the DC blocker */
     s->carrier_on_power = (int32_t) (power_meter_level_dbm0(cutoff + 2.5f)*0.4f);
@@ -197,6 +174,7 @@ static void report_status_change(v29_rx_state_t *s, int status)
         s->status_handler(s->status_user_data, status);
     else if (s->put_bit)
         s->put_bit(s->put_bit_user_data, status);
+    /*endif*/
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -379,6 +357,7 @@ static int scrambled_training_bit(v29_rx_state_t *s)
     s->training_scramble_reg >>= 1;
     if (bit ^ (s->training_scramble_reg & 1))
         s->training_scramble_reg |= 0x40;
+    /*endif*/
     return bit;
 }
 /*- End of function --------------------------------------------------------*/
@@ -413,6 +392,7 @@ static __inline__ void put_bit(v29_rx_state_t *s, int bit)
            buggy modems mean you cannot rely on this. Therefore we don't bother
            testing for ones, but just rely on a constellation mismatch measurement. */
     }
+    /*endif*/
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -458,10 +438,12 @@ static void decode_baud(v29_rx_state_t *s, complexf_t *z)
             re = 19;
         else if (re < 0)
             re = 0;
+        /*endif*/
         if (im > 19)
             im = 19;
         else if (im < 0)
             im = 0;
+        /*endif*/
         nearest = space_map_9600[re][im];
         if (s->bit_rate == 9600)
         {
@@ -473,13 +455,16 @@ static void decode_baud(v29_rx_state_t *s, complexf_t *z)
             /* We can reuse the space map for 9600, but drop the top bit. */
             nearest &= 7;
         }
+        /*endif*/
         raw_bits = phase_steps_9600[(nearest - s->constellation_state) & 7];
         for (i = 0;  i < 3;  i++)
         {
             put_bit(s, raw_bits);
             raw_bits >>= 1;
         }
+        /*endfor*/
     }
+    /*endif*/
 
     track_carrier(s, z, &v29_9600_constellation[nearest]);
     if (--s->eq_skip <= 0)
@@ -490,63 +475,8 @@ static void decode_baud(v29_rx_state_t *s, complexf_t *z)
         s->eq_skip = 10;
         tune_equalizer(s, z, &v29_9600_constellation[nearest]);
     }
+    /*endif*/
     s->constellation_state = nearest;
-}
-/*- End of function --------------------------------------------------------*/
-
-static __inline__ void symbol_sync(v29_rx_state_t *s)
-{
-    int i;
-#if defined(SPANDSP_USE_FIXED_POINT)
-    int32_t v;
-    int32_t p;
-#else
-    float v;
-    float p;
-#endif
-
-    /* This routine adapts the position of the half baud samples entering the equalizer. */
-
-    /* This symbol sync scheme is based on the technique first described by Dominique Godard in
-        Passband Timing Recovery in an All-Digital Modem Receiver
-        IEEE TRANSACTIONS ON COMMUNICATIONS, VOL. COM-26, NO. 5, MAY 1978 */
-
-    /* This is slightly rearranged from figure 3b of the Godard paper, as this saves a couple of
-       maths operations */
-#if defined(SPANDSP_USE_FIXED_POINT)
-    /* TODO: The scalings used here need more thorough evaluation, to see if overflows are possible. */
-    /* Cross correlate */
-    v = (((s->symbol_sync_low[1] >> (FP_SYNC_SHIFT_FACTOR/2))*(s->symbol_sync_high[0] >> (FP_SYNC_SHIFT_FACTOR/2))) >> 14)*SYNC_LOW_BAND_EDGE_COEFF_2
-      - (((s->symbol_sync_low[0] >> (FP_SYNC_SHIFT_FACTOR/2))*(s->symbol_sync_high[1] >> (FP_SYNC_SHIFT_FACTOR/2))) >> 14)*SYNC_HIGH_BAND_EDGE_COEFF_2
-      + (((s->symbol_sync_low[1] >> (FP_SYNC_SHIFT_FACTOR/2))*(s->symbol_sync_high[1] >> (FP_SYNC_SHIFT_FACTOR/2))) >> 14)*SYNC_MIXED_EDGES_COEFF_3;
-    /* Filter away any DC component */
-    p = v - s->symbol_sync_dc_filter[1];
-    s->symbol_sync_dc_filter[1] = s->symbol_sync_dc_filter[0];
-    s->symbol_sync_dc_filter[0] = v;
-    /* A little integration will now filter away much of the HF noise */
-    s->baud_phase -= p;
-    v = labs(s->baud_phase);
-#else
-    /* Cross correlate */
-    v = s->symbol_sync_low[1]*s->symbol_sync_high[0]*SYNC_LOW_BAND_EDGE_COEFF_2
-      - s->symbol_sync_low[0]*s->symbol_sync_high[1]*SYNC_HIGH_BAND_EDGE_COEFF_2
-      + s->symbol_sync_low[1]*s->symbol_sync_high[1]*SYNC_MIXED_EDGES_COEFF_3;
-    /* Filter away any DC component */
-    p = v - s->symbol_sync_dc_filter[1];
-    s->symbol_sync_dc_filter[1] = s->symbol_sync_dc_filter[0];
-    s->symbol_sync_dc_filter[0] = v;
-    /* A little integration will now filter away much of the HF noise */
-    s->baud_phase -= p;
-    v = fabsf(s->baud_phase);
-#endif
-    if (v > FP_SYNC_SCALE_32(30.0f))
-    {
-        i = (v > FP_SYNC_SCALE_32(1000.0f))  ?  5  :  1;
-        if (s->baud_phase < FP_SYNC_SCALE_32(0.0f))
-            i = -i;
-        s->eq_put_step += i;
-        s->total_baud_timing_correction += i;
-    }
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -587,13 +517,15 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
     s->eq_buf[s->eq_step] = *sample;
     if (++s->eq_step >= V29_EQUALIZER_LEN)
         s->eq_step = 0;
+    /*endif*/
 
     /* On alternate insertions we have a whole baud, and must process it. */
     if ((s->baud_half ^= 1))
         return;
+    /*endif*/
 
     /* Symbol timing synchronisation */
-    symbol_sync(s);
+    s->eq_put_step += godard_ted_per_baud(&s->godard);
 
     z = equalizer_get(s);
 
@@ -622,7 +554,9 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
 #endif
                 s->agc_scaling_save = s->agc_scaling;
             }
+            /*endif*/
         }
+        /*endif*/
         break;
     case TRAINING_STAGE_LOG_PHASE:
         /* Record the current alternate phase angle */
@@ -656,6 +590,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
                 ang = (s->diff_angles[j] + s->diff_angles[j | 0x1])/(i - 1);
                 s->carrier_phase_rate += 3*16*(ang/20);
             }
+            /*endif*/
             span_log(&s->logging, SPAN_LOG_FLOW, "Coarse carrier frequency %7.2f\n", dds_frequencyf(s->carrier_phase_rate));
             /* Check if the carrier frequency is plausible */
             if (s->carrier_phase_rate < DDS_PHASE_RATE(CARRIER_NOMINAL_FREQ - 20.0f)
@@ -669,6 +604,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
                 report_status_change(s, SIG_STATUS_TRAINING_FAILED);
                 break;
             }
+            /*endif*/
             /* Make a step shift in the phase, to pull it into line. We need to rotate the equalizer
                buffer, as well as the carrier phase, for this to play out nicely. */
 #if defined(SPANDSP_USE_FIXED_POINT)
@@ -677,12 +613,14 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
             z16 = complex_seti16(fixed_cos(ip), -fixed_sin(ip));
             for (i = 0;  i < V29_EQUALIZER_LEN;  i++)
                 s->eq_buf[i] = complex_mul_q1_15(&s->eq_buf[i], &z16);
+            /*endfor*/
 #else
             p = dds_phase_to_radians(angle);
             span_log(&s->logging, SPAN_LOG_FLOW, "Spin by %.5f rads\n", p);
             zz = complex_setf(cosf(p), -sinf(p));
             for (i = 0;  i < V29_EQUALIZER_LEN;  i++)
                 s->eq_buf[i] = complex_mulf(&s->eq_buf[i], &zz);
+            /*endfor*/
 #endif
             s->carrier_phase += angle;
             /* We have just seen the first bit of the scrambled sequence, so skip it. */
@@ -694,6 +632,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
             report_status_change(s, SIG_STATUS_TRAINING_IN_PROGRESS);
             break;
         }
+        /*endif*/
         if (++s->training_count > V29_TRAINING_SEG_2_LEN)
         {
             /* This is bogus. There are not this many bauds in this section
@@ -704,6 +643,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
             s->training_stage = TRAINING_STAGE_PARKED;
             report_status_change(s, SIG_STATUS_TRAINING_FAILED);
         }
+        /*endif*/
         break;
     case TRAINING_STAGE_TRAIN_ON_CDCD:
         /* Train on the scrambled CDCD section. */
@@ -725,6 +665,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
             s->carrier_track_p = 1000000.0f;
 #endif
         }
+        /*endif*/
         break;
     case TRAINING_STAGE_TRAIN_ON_CDCD_AND_TEST:
         /* Continue training on the scrambled CDCD section, but measure the quality of training too. */
@@ -764,7 +705,9 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
                 s->training_stage = TRAINING_STAGE_PARKED;
                 report_status_change(s, SIG_STATUS_TRAINING_FAILED);
             }
+            /*endif*/
         }
+        /*endif*/
         break;
     case TRAINING_STAGE_TEST_ONES:
         /* We are in the test phase, where we check that we can receive reliably.
@@ -811,7 +754,9 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
                 s->training_stage = TRAINING_STAGE_PARKED;
                 report_status_change(s, SIG_STATUS_TRAINING_FAILED);
             }
+            /*endif*/
         }
+        /*endif*/
         break;
     case TRAINING_STAGE_PARKED:
     default:
@@ -820,6 +765,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
         target = &zero;
         break;
     }
+    /*endswitch*/
     if (s->qam_report)
     {
 #if defined(SPANDSP_USE_FIXED_POINT)
@@ -835,6 +781,7 @@ static void process_half_baud(v29_rx_state_t *s, complexf_t *sample)
         s->qam_report(s->qam_user_data, &z, target, s->constellation_state);
 #endif
     }
+    /*endif*/
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -863,13 +810,16 @@ static __inline__ int signal_detect(v29_rx_state_t *s, int16_t amp)
             s->high_sample = 0;
             s->low_samples = 0;
         }
+        /*endif*/
     }
     else
     {
         s->low_samples = 0;
         if (diff > s->high_sample)
             s->high_sample = diff;
+        /*endif*/
     }
+    /*endif*/
 #endif
     if (s->signal_present > 0)
     {
@@ -888,24 +838,28 @@ static __inline__ int signal_detect(v29_rx_state_t *s, int16_t amp)
                 report_status_change(s, SIG_STATUS_CARRIER_DOWN);
                 return 0;
             }
+            /*endif*/
 #if defined(IAXMODEM_STUFF)
             /* Carrier has dropped, but the put_bit is pending the
                signal_present delay. */
             s->carrier_drop_pending = true;
 #endif
         }
+        /*endif*/
     }
     else
     {
         /* Look for power exceeding turn-on threshold to turn the carrier on */
         if (power < s->carrier_on_power)
             return 0;
+        /*endif*/
         s->signal_present = 1;
 #if defined(IAXMODEM_STUFF)
         s->carrier_drop_pending = false;
 #endif
         report_status_change(s, SIG_STATUS_CARRIER_UP);
     }
+    /*endif*/
     return power;
 }
 /*- End of function --------------------------------------------------------*/
@@ -933,54 +887,34 @@ SPAN_DECLARE(int) v29_rx(v29_rx_state_t *s, const int16_t amp[], int len)
         s->rrc_filter[s->rrc_filter_step] = amp[i];
         if (++s->rrc_filter_step >= V29_RX_FILTER_STEPS)
             s->rrc_filter_step = 0;
+        /*endif*/
 
         if ((power = signal_detect(s, amp[i])) == 0)
             continue;
+        /*endif*/
         if (s->training_stage == TRAINING_STAGE_PARKED)
             continue;
+        /*endif*/
         /* Only spend effort processing this data if the modem is not
            parked, after training failure. */
         s->eq_put_step -= RX_PULSESHAPER_COEFF_SETS;
         step = -s->eq_put_step;
         if (step < 0)
             step += RX_PULSESHAPER_COEFF_SETS;
+        /*endif*/
         if (step < 0)
             step = 0;
         else if (step > RX_PULSESHAPER_COEFF_SETS - 1)
             step = RX_PULSESHAPER_COEFF_SETS - 1;
+        /*endif*/
 #if defined(SPANDSP_USE_FIXED_POINT)
         v = vec_circular_dot_prodi16(s->rrc_filter, rx_pulseshaper_re[step], V29_RX_FILTER_STEPS, s->rrc_filter_step) >> 15;
         sample.re = (v*s->agc_scaling) >> 10;
-        /* Symbol timing synchronisation band edge filters */
-        /* Low Nyquist band edge filter */
-        v = ((s->symbol_sync_low[0]*SYNC_LOW_BAND_EDGE_COEFF_0) >> FP_SYNC_SHIFT_FACTOR)
-          + ((s->symbol_sync_low[1]*SYNC_LOW_BAND_EDGE_COEFF_1) >> FP_SYNC_SHIFT_FACTOR)
-          + sample.re;
-        s->symbol_sync_low[1] = s->symbol_sync_low[0];
-        s->symbol_sync_low[0] = v;
-        /* High Nyquist band edge filter */
-        v = ((s->symbol_sync_high[0]*SYNC_HIGH_BAND_EDGE_COEFF_0) >> FP_SYNC_SHIFT_FACTOR)
-          + ((s->symbol_sync_high[1]*SYNC_HIGH_BAND_EDGE_COEFF_1) >> FP_SYNC_SHIFT_FACTOR)
-          + sample.re;
-        s->symbol_sync_high[1] = s->symbol_sync_high[0];
-        s->symbol_sync_high[0] = v;
 #else
         v = vec_circular_dot_prodf(s->rrc_filter, rx_pulseshaper_re[step], V29_RX_FILTER_STEPS, s->rrc_filter_step);
         sample.re = v*s->agc_scaling;
-        /* Symbol timing synchronisation band edge filters */
-        /* Low Nyquist band edge filter */
-        v = s->symbol_sync_low[0]*SYNC_LOW_BAND_EDGE_COEFF_0
-          + s->symbol_sync_low[1]*SYNC_LOW_BAND_EDGE_COEFF_1
-          + sample.re;
-        s->symbol_sync_low[1] = s->symbol_sync_low[0];
-        s->symbol_sync_low[0] = v;
-        /* High Nyquist band edge filter */
-        v = s->symbol_sync_high[0]*SYNC_HIGH_BAND_EDGE_COEFF_0
-          + s->symbol_sync_high[1]*SYNC_HIGH_BAND_EDGE_COEFF_1
-          + sample.re;
-        s->symbol_sync_high[1] = s->symbol_sync_high[0];
-        s->symbol_sync_high[0] = v;
 #endif
+        godard_ted_rx(&s->godard, sample.re);
         /* Put things into the equalization buffer at T/2 rate. The symbol synchronisation
            will fiddle the step to align this with the symbols. */
         if (s->eq_put_step <= 0)
@@ -990,12 +924,14 @@ SPAN_DECLARE(int) v29_rx(v29_rx_state_t *s, const int16_t amp[], int len)
             {
                 if ((root_power = fixed_sqrt32(power)) == 0)
                     root_power = 1;
+                /*endif*/
 #if defined(SPANDSP_USE_FIXED_POINT)
                 s->agc_scaling = saturate16(((int32_t) (FP_SCALE(1.25f)*1024.0f))/root_power);
 #else
                 s->agc_scaling = (FP_SCALE(1.25f)/RX_PULSESHAPER_GAIN)/root_power;
 #endif
             }
+            /*endif*/
             /* Pulse shape while still at the carrier frequency, using a quadrature
                pair of filters. This results in a properly bandpass filtered complex
                signal, which can be brought directly to baseband by complex mixing.
@@ -1016,12 +952,14 @@ SPAN_DECLARE(int) v29_rx(v29_rx_state_t *s, const int16_t amp[], int len)
             s->eq_put_step += RX_PULSESHAPER_COEFF_SETS*10/(3*2);
             process_half_baud(s, &zz);
         }
+        /*endif*/
 #if defined(SPANDSP_USE_FIXED_POINT)
         dds_advance(&s->carrier_phase, s->carrier_phase_rate);
 #else
         dds_advancef(&s->carrier_phase, s->carrier_phase_rate);
 #endif
     }
+    /*endfor*/
     return 0;
 }
 /*- End of function --------------------------------------------------------*/
@@ -1035,8 +973,10 @@ SPAN_DECLARE(int) v29_rx_fillin(v29_rx_state_t *s, int len)
     span_log(&s->logging, SPAN_LOG_FLOW, "Fill-in %d samples\n", len);
     if (s->signal_present <= 0)
         return 0;
+    /*endif*/
     if (s->training_stage == TRAINING_STAGE_PARKED)
         return 0;
+    /*endif*/
     for (i = 0;  i < len;  i++)
     {
 #if defined(SPANDSP_USE_FIXED_POINT)
@@ -1048,20 +988,22 @@ SPAN_DECLARE(int) v29_rx_fillin(v29_rx_state_t *s, int len)
         s->eq_put_step -= RX_PULSESHAPER_COEFF_SETS;
         if (s->eq_put_step <= 0)
             s->eq_put_step += RX_PULSESHAPER_COEFF_SETS*10/(3*2);
+        /*endif*/
         /* TODO: Should we rotate any buffers */
     }
+    /*endfor*/
     return 0;
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(void) v29_rx_set_put_bit(v29_rx_state_t *s, put_bit_func_t put_bit, void *user_data)
+SPAN_DECLARE(void) v29_rx_set_put_bit(v29_rx_state_t *s, span_put_bit_func_t put_bit, void *user_data)
 {
     s->put_bit = put_bit;
     s->put_bit_user_data = user_data;
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(void) v29_rx_set_modem_status_handler(v29_rx_state_t *s, modem_status_func_t handler, void *user_data)
+SPAN_DECLARE(void) v29_rx_set_modem_status_handler(v29_rx_state_t *s, span_modem_status_func_t handler, void *user_data)
 {
     s->status_handler = handler;
     s->status_user_data = user_data;
@@ -1076,8 +1018,6 @@ SPAN_DECLARE(logging_state_t *) v29_rx_get_logging_state(v29_rx_state_t *s)
 
 SPAN_DECLARE(int) v29_rx_restart(v29_rx_state_t *s, int bit_rate, bool old_train)
 {
-    int i;
-
     switch (bit_rate)
     {
     case 9600:
@@ -1092,6 +1032,7 @@ SPAN_DECLARE(int) v29_rx_restart(v29_rx_state_t *s, int bit_rate, bool old_train
     default:
         return -1;
     }
+    /*endswitch*/
     s->bit_rate = bit_rate;
 
 #if defined(SPANDSP_USE_FIXED_POINT)
@@ -1137,6 +1078,7 @@ SPAN_DECLARE(int) v29_rx_restart(v29_rx_state_t *s, int bit_rate, bool old_train
         s->agc_scaling = (FP_SCALE(1.25f)/RX_PULSESHAPER_GAIN)/735.0f;
 #endif
     }
+    /*endif*/
 #if defined(SPANDSP_USE_FIXED_POINT)
     s->carrier_track_i = 8000;
     s->carrier_track_p = 8000000;
@@ -1147,22 +1089,15 @@ SPAN_DECLARE(int) v29_rx_restart(v29_rx_state_t *s, int bit_rate, bool old_train
     s->last_sample = 0;
     s->eq_skip = 0;
 
-    /* Initialise the working data for symbol timing synchronisation */
-    for (i = 0;  i < 2;  i++)
-    {
-        s->symbol_sync_low[i] = FP_SCALE(0.0f);
-        s->symbol_sync_high[i] = FP_SCALE(0.0f);
-        s->symbol_sync_dc_filter[i] = FP_SCALE(0.0f);
-    }
-    s->baud_phase = FP_SCALE(0.0f);
+    godard_ted_init(&s->godard, &godard_desc);
+
     s->baud_half = 0;
 
-    s->total_baud_timing_correction = 0;
     return 0;
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(v29_rx_state_t *) v29_rx_init(v29_rx_state_t *s, int bit_rate, put_bit_func_t put_bit, void *user_data)
+SPAN_DECLARE(v29_rx_state_t *) v29_rx_init(v29_rx_state_t *s, int bit_rate, span_put_bit_func_t put_bit, void *user_data)
 {
     switch (bit_rate)
     {
@@ -1173,11 +1108,14 @@ SPAN_DECLARE(v29_rx_state_t *) v29_rx_init(v29_rx_state_t *s, int bit_rate, put_
     default:
         return NULL;
     }
+    /*endswitch*/
     if (s == NULL)
     {
         if ((s = (v29_rx_state_t *) span_alloc(sizeof(*s))) == NULL)
             return NULL;
+        /*endif*/
     }
+    /*endif*/
     memset(s, 0, sizeof(*s));
     span_log_init(&s->logging, SPAN_LOG_NONE, NULL);
     span_log_set_protocol(&s->logging, "V.29 RX");
@@ -1188,7 +1126,7 @@ SPAN_DECLARE(v29_rx_state_t *) v29_rx_init(v29_rx_state_t *s, int bit_rate, put_
        higher level (though at 9600bps and 7200bps, TCM should put V.17 sensitivity several
        dB ahead of V.29). */
     /* The thresholds should be on at -26dBm0 and off at -31dBm0 */
-    v29_rx_signal_cutoff(s, -28.5f);
+    v29_rx_set_signal_cutoff(s, -28.5f);
 
     v29_rx_restart(s, bit_rate, false);
     return s;

@@ -59,6 +59,7 @@
 #include "spandsp/tone_generate.h"
 #include "spandsp/async.h"
 #include "spandsp/hdlc.h"
+#include "spandsp/ssl_fax.h"
 #include "spandsp/fsk.h"
 #include "spandsp/v29rx.h"
 #include "spandsp/v29tx.h"
@@ -82,6 +83,7 @@
 
 #include "spandsp/private/logging.h"
 #include "spandsp/private/timezone.h"
+#include "spandsp/private/ssl_fax.h"
 #include "spandsp/private/t81_t82_arith_coding.h"
 #include "spandsp/private/t85.h"
 #include "spandsp/private/t42.h"
@@ -775,7 +777,7 @@ SPAN_DECLARE(void) t30_set_tx_file(t30_state_t *s, const char *file, int start_p
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(void) t30_set_iaf_mode(t30_state_t *s, bool iaf)
+SPAN_DECLARE(void) t30_set_iaf_mode(t30_state_t *s, int iaf)
 {
     s->iaf = iaf;
 }
@@ -786,6 +788,24 @@ SPAN_DECLARE(int) t30_set_ecm_capability(t30_state_t *s, bool enabled)
     s->ecm_allowed = enabled;
     t30_build_dis_or_dtc(s);
     return 0;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(void) t30_set_retransmit_capable(t30_state_t *s, bool enabled)
+{
+    s->retransmit_capable = enabled;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(void) t30_set_max_command_tries(t30_state_t *s, int tries)
+{
+    s->max_command_tries = tries;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(void) t30_set_max_response_tries(t30_state_t *s, int tries)
+{
+    s->max_response_tries = tries;
 }
 /*- End of function --------------------------------------------------------*/
 

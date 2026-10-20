@@ -149,14 +149,17 @@ static __inline__ complexf_t training_get(v17_tx_state_t *s)
                 /* Optional segment: Unmodulated carrier (talker echo protection) */
                 return v17_v32bis_abcd_constellation[0];
             }
+            /*endif*/
             if (s->training_step <= V17_TRAINING_SEG_1)
             {
                 /* Optional segment: silence (talker echo protection) */
                 return zero;
             }
+            /*endif*/
             /* Segment 1: ABAB... */
             return v17_v32bis_abcd_constellation[(s->training_step & 1) ^ 1];
         }
+        /*endif*/
         /* Segment 2: CDBA... */
         /* Apply the scrambler */
         bits = scramble(s, 1);
@@ -167,8 +170,10 @@ static __inline__ complexf_t training_get(v17_tx_state_t *s)
             /* Go straight to the ones test. */
             s->training_step = V17_TRAINING_SEG_4;
         }
+        /*endif*/
         return v17_v32bis_abcd_constellation[s->constellation_state];
     }
+    /*endif*/
     /* Segment 3: Bridge... */
     shift = ((s->training_step - V17_TRAINING_SEG_3 - 1) & 0x7) << 1;
     //span_log(&s->logging, SPAN_LOG_FLOW, "Seg 3 shift %d\n", shift);
@@ -195,7 +200,7 @@ static __inline__ int diff_and_convolutional_encode(v17_tx_state_t *s, int q)
         {2, 3, 0, 1},
         {3, 0, 1, 2}
     };
-    static const uint8_t v17_convolutional_coder[8][4] =
+    static const uint8_t v17_convolutional_encoder[8][4] =
     {
         {0, 2, 3, 1},
         {4, 7, 5, 6},
@@ -214,11 +219,12 @@ static __inline__ int diff_and_convolutional_encode(v17_tx_state_t *s, int q)
         s->diff = v32bis_4800_differential_encoder[s->diff][q & 0x03];
         return s->diff;
     }
+    /*endif*/
     /* Differentially encode */
     s->diff = v17_differential_encoder[s->diff][q & 0x03];
 
     /* Convolutionally encode the redundant bit */
-    s->convolution = v17_convolutional_coder[s->convolution][s->diff];
+    s->convolution = v17_convolutional_encoder[s->convolution][s->diff];
 
     /* The final result is the combination of some uncoded bits, 2 differentially
        encoded bits, and the convolutionally encoded redundant bit. */
@@ -254,6 +260,7 @@ static __inline__ complexf_t getbaud(v17_tx_state_t *s)
             /* Send the training sequence */
             if (s->training_step < V17_TRAINING_SEG_4)
                 return training_get(s);
+            /*endif*/
             /* The last step in training is to send some 1's */
             if (++s->training_step > V17_TRAINING_END)
             {
@@ -261,6 +268,7 @@ static __inline__ complexf_t getbaud(v17_tx_state_t *s)
                 s->current_get_bit = s->get_bit;
                 s->in_training = false;
             }
+            /*endif*/
         }
         else
         {
@@ -270,13 +278,18 @@ static __inline__ complexf_t getbaud(v17_tx_state_t *s)
                    of silence */
                 return zero;
             }
+            /*endif*/
             if (s->training_step == V17_TRAINING_SHUTDOWN_END)
             {
                 if (s->status_handler)
                     s->status_handler(s->status_user_data, SIG_STATUS_SHUTDOWN_COMPLETE);
+                /*endif*/
             }
+            /*endif*/
         }
+        /*endif*/
     }
+    /*endif*/
     bits = 0;
     for (i = 0;  i < s->bits_per_symbol;  i++)
     {
@@ -286,12 +299,15 @@ static __inline__ complexf_t getbaud(v17_tx_state_t *s)
                have shut down completely. */
             if (s->status_handler)
                 s->status_handler(s->status_user_data, SIG_STATUS_END_OF_DATA);
+            /*endif*/
             s->current_get_bit = fake_get_bit;
             s->in_training = true;
             bit = 1;
         }
+        /*endif*/
         bits |= (scramble(s, bit) << i);
     }
+    /*endfor*/
     return s->constellation[diff_and_convolutional_encode(s, bits)];
 }
 /*- End of function --------------------------------------------------------*/
@@ -316,6 +332,7 @@ SPAN_DECLARE(int) v17_tx(v17_tx_state_t *s, int16_t amp[], int len)
         /* Once we have sent the shutdown sequence, we stop sending completely. */
         return 0;
     }
+    /*endif*/
     for (sample = 0;  sample < len;  sample++)
     {
         if ((s->baud_phase += 3) >= 10)
@@ -326,9 +343,11 @@ SPAN_DECLARE(int) v17_tx(v17_tx_state_t *s, int16_t amp[], int len)
             s->rrc_filter_im[s->rrc_filter_step] = v.im;
             if (++s->rrc_filter_step >= V17_TX_FILTER_STEPS)
                 s->rrc_filter_step = 0;
+            /*endif*/
         }
-#if defined(SPANDSP_USE_FIXED_POINT)
+        /*endif*/
         /* Root raised cosine pulse shaping at baseband */
+#if defined(SPANDSP_USE_FIXED_POINT)
         x.re = vec_circular_dot_prodi16(s->rrc_filter_re, tx_pulseshaper[TX_PULSESHAPER_COEFF_SETS - 1 - s->baud_phase], V17_TX_FILTER_STEPS, s->rrc_filter_step) >> 4;
         x.im = vec_circular_dot_prodi16(s->rrc_filter_im, tx_pulseshaper[TX_PULSESHAPER_COEFF_SETS - 1 - s->baud_phase], V17_TX_FILTER_STEPS, s->rrc_filter_step) >> 4;
         /* Now create and modulate the carrier */
@@ -337,7 +356,6 @@ SPAN_DECLARE(int) v17_tx(v17_tx_state_t *s, int16_t amp[], int len)
         /* Don't bother saturating. We should never clip. */
         amp[sample] = (int16_t) (((int32_t) iamp*s->gain) >> 11);
 #else
-        /* Root raised cosine pulse shaping at baseband */
         x.re = vec_circular_dot_prodf(s->rrc_filter_re, tx_pulseshaper[TX_PULSESHAPER_COEFF_SETS - 1 - s->baud_phase], V17_TX_FILTER_STEPS, s->rrc_filter_step);
         x.im = vec_circular_dot_prodf(s->rrc_filter_im, tx_pulseshaper[TX_PULSESHAPER_COEFF_SETS - 1 - s->baud_phase], V17_TX_FILTER_STEPS, s->rrc_filter_step);
         /* Now create and modulate the carrier */
@@ -347,6 +365,7 @@ SPAN_DECLARE(int) v17_tx(v17_tx_state_t *s, int16_t amp[], int len)
         amp[sample] = (int16_t) lfastrintf(famp*s->gain);
 #endif
     }
+    /*endfor*/
     return sample;
 }
 /*- End of function --------------------------------------------------------*/
@@ -357,7 +376,7 @@ SPAN_DECLARE(void) v17_tx_power(v17_tx_state_t *s, float power)
 
     /* The constellation design seems to keep the average power the same, regardless
        of which bit rate is in use. */
-    gain = 0.223f*powf(10.0f, (power - DBM0_MAX_POWER)/20.0f)*32768.0f/TX_PULSESHAPER_GAIN;
+    gain = 0.223f*db_to_amplitude_ratio(power - DBM0_MAX_SINE_POWER)*32768.0f/TX_PULSESHAPER_GAIN;
 #if defined(SPANDSP_USE_FIXED_POINT)
     s->gain = (int16_t) gain;
 #else
@@ -366,16 +385,17 @@ SPAN_DECLARE(void) v17_tx_power(v17_tx_state_t *s, float power)
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(void) v17_tx_set_get_bit(v17_tx_state_t *s, get_bit_func_t get_bit, void *user_data)
+SPAN_DECLARE(void) v17_tx_set_get_bit(v17_tx_state_t *s, span_get_bit_func_t get_bit, void *user_data)
 {
     if (s->get_bit == s->current_get_bit)
         s->current_get_bit = get_bit;
+    /*endif*/
     s->get_bit = get_bit;
     s->get_bit_user_data = user_data;
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(void) v17_tx_set_modem_status_handler(v17_tx_state_t *s, modem_status_func_t handler, void *user_data)
+SPAN_DECLARE(void) v17_tx_set_modem_status_handler(v17_tx_state_t *s, span_modem_status_func_t handler, void *user_data)
 {
     s->status_handler = handler;
     s->status_user_data = user_data;
@@ -417,6 +437,7 @@ SPAN_DECLARE(int) v17_tx_restart(v17_tx_state_t *s, int bit_rate, bool tep, bool
     default:
         return -1;
     }
+    /*endswitch*/
     s->bit_rate = bit_rate;
     /* NB: some modems seem to use 3 instead of 1 for long training */
     s->diff = (short_train)  ?  0  :  1;
@@ -441,7 +462,7 @@ SPAN_DECLARE(int) v17_tx_restart(v17_tx_state_t *s, int bit_rate, bool tep, bool
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(v17_tx_state_t *) v17_tx_init(v17_tx_state_t *s, int bit_rate, bool tep, get_bit_func_t get_bit, void *user_data)
+SPAN_DECLARE(v17_tx_state_t *) v17_tx_init(v17_tx_state_t *s, int bit_rate, bool tep, span_get_bit_func_t get_bit, void *user_data)
 {
     switch (bit_rate)
     {
@@ -455,11 +476,14 @@ SPAN_DECLARE(v17_tx_state_t *) v17_tx_init(v17_tx_state_t *s, int bit_rate, bool
     default:
         return NULL;
     }
+    /*endswitch*/
     if (s == NULL)
     {
         if ((s = (v17_tx_state_t *) span_alloc(sizeof(*s))) == NULL)
             return NULL;
+        /*endif*/
     }
+    /*endif*/
     memset(s, 0, sizeof(*s));
     span_log_init(&s->logging, SPAN_LOG_NONE, NULL);
     span_log_set_protocol(&s->logging, "V.17 TX");

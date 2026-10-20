@@ -31,11 +31,10 @@ EXTRA_DIST = autogen.sh \
              debian/compat \
              debian/control \
              debian/copyright \
-             debian/libspandsp3.install \
-             debian/libspandsp3-dev.install \
-             debian/libspandsp3-doc.install \
+             debian/libspandsp4.install \
+             debian/libspandsp4-dev.install \
+             debian/libspandsp4-doc.install \
              debian/rules \
-             debian/watch \
              README.testdata \
              spandsp.spec \
              spandsp/fax-tests.dtd \
@@ -56,9 +55,9 @@ endif
 if COND_TESTS
     MAYBE_TESTS=spandsp-sim test-data tests
 endif
-SUBDIRS = src $(MAYBE_DOC) $(MAYBE_TESTS)
+SUBDIRS = src tools $(MAYBE_DOC) $(MAYBE_TESTS)
 
-DIST_SUBDIRS = src doc test-data spandsp-sim tests
+DIST_SUBDIRS = src tools doc test-data spandsp-sim tests
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = spandsp.pc
