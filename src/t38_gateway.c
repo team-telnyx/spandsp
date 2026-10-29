@@ -959,6 +959,21 @@ static int process_rx_indicator(t38_core_state_t *t, void *user_data, int indica
         indicator != T38_IND_CNG)
     {
         span_log(&s->logging, SPAN_LOG_FLOW, "Stopping CNG for %s\n", t38_indicator_to_str(indicator));
+        /* A T.38 side that sends a cng indicator for each CNG burst leaves cng and no-signal
+           indicators queued ahead of this one. They are stale now, and would start CNG again. */
+        while (u->buf[u->out].contents == (T38_IND_CNG | FLAG_INDICATOR)
+               ||
+               u->buf[u->out].contents == (T38_IND_NO_SIGNAL | FLAG_INDICATOR))
+        {
+            span_log(&s->logging, SPAN_LOG_FLOW, "Dropping queued %s\n", t38_indicator_to_str(u->buf[u->out].contents & 0xFF));
+            u->buf[u->out].len = 0;
+            u->buf[u->out].flags = 0;
+            u->buf[u->out].contents = 0;
+            if (++u->out >= T38_TX_HDLC_BUFS)
+                u->out = 0;
+            /*endif*/
+        }
+        /*endwhile*/
         set_next_tx_type(s);
     }
     /*endif*/
