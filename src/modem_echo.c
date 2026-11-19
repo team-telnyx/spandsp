@@ -44,59 +44,24 @@
 #if defined(HAVE_MATH_H)
 #include <math.h>
 #endif
+#if defined(HAVE_STDBOOL_H)
+#include <stdbool.h>
+#else
+#include "spandsp/stdbool.h"
+#endif
 #include "floating_fudge.h"
 
 #include "spandsp/telephony.h"
 #include "spandsp/alloc.h"
+#include "spandsp/logging.h"
 #include "spandsp/bit_operations.h"
 #include "spandsp/dc_restore.h"
 #include "spandsp/modem_echo.h"
 
+#include "spandsp/private/logging.h"
 #include "spandsp/private/modem_echo.h"
 
-SPAN_DECLARE(void) modem_echo_can_free(modem_echo_can_state_t *ec)
-{
-    fir16_free(&ec->fir_state);
-    span_free(ec->fir_taps32);
-    span_free(ec->fir_taps16);
-    span_free(ec);
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(modem_echo_can_state_t *) modem_echo_can_init(int len)
-{
-    modem_echo_can_state_t *ec;
-
-    if ((ec = (modem_echo_can_state_t *) span_alloc(sizeof(*ec))) == NULL)
-        return NULL;
-    memset(ec, 0, sizeof(*ec));
-    ec->taps = len;
-    ec->curr_pos = ec->taps - 1;
-    if ((ec->fir_taps32 = (int32_t *) span_alloc(ec->taps*sizeof(int32_t))) == NULL)
-    {
-        span_free(ec);
-        return NULL;
-    }
-    memset(ec->fir_taps32, 0, ec->taps*sizeof(int32_t));
-    if ((ec->fir_taps16 = (int16_t *) span_alloc(ec->taps*sizeof(int16_t))) == NULL)
-    {
-        span_free(ec->fir_taps32);
-        span_free(ec);
-        return NULL;
-    }
-    memset(ec->fir_taps16, 0, ec->taps*sizeof(int16_t));
-    if (fir16_create(&ec->fir_state, ec->fir_taps16, ec->taps) == NULL)
-    {
-        span_free(ec->fir_taps16);
-        span_free(ec->fir_taps32);
-        span_free(ec);
-        return NULL;
-    }
-    return ec;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(void) modem_echo_can_flush(modem_echo_can_state_t *ec)
+SPAN_DECLARE(void) modem_echo_can_flush(modem_echo_can_segment_state_t *ec)
 {
     ec->tx_power = 0;
 
@@ -108,13 +73,13 @@ SPAN_DECLARE(void) modem_echo_can_flush(modem_echo_can_state_t *ec)
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(void) modem_echo_can_adaption_mode(modem_echo_can_state_t *ec, int adapt)
+SPAN_DECLARE(void) modem_echo_can_adaption_mode(modem_echo_can_segment_state_t *ec, int adapt)
 {
     ec->adapt = adapt;
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(int16_t) modem_echo_can_update(modem_echo_can_state_t *ec, int16_t tx, int16_t rx)
+SPAN_DECLARE(int16_t) modem_echo_can_update(modem_echo_can_segment_state_t *ec, int16_t tx, int16_t rx)
 {
     int32_t echo_value;
     int clean_rx;
@@ -159,19 +124,68 @@ SPAN_DECLARE(int16_t) modem_echo_can_update(modem_echo_can_state_t *ec, int16_t 
             ec->fir_taps32[i] += (ec->fir_state.history[i - offset1]*clean_rx) >> shift;
             ec->fir_taps16[i] = (int16_t) (ec->fir_taps32[i] >> 15);
         }
+        /*endfor*/
         for (  ;  i >= 0;  i--)
         {
             ec->fir_taps32[i] -= (ec->fir_taps32[i] >> 23);
             ec->fir_taps32[i] += (ec->fir_state.history[i + offset2]*clean_rx) >> shift;
             ec->fir_taps16[i] = (int16_t) (ec->fir_taps32[i] >> 15);
         }
+        /*endfor*/
     }
+    /*endif*/
 
     /* Roll around the rolling buffer */
     if (ec->curr_pos <= 0)
         ec->curr_pos = ec->taps;
+    /*endif*/
     ec->curr_pos--;
     return (int16_t) clean_rx;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(void) modem_echo_can_segment_free(modem_echo_can_segment_state_t *ec)
+{
+    fir16_free(&ec->fir_state);
+    span_free(ec->fir_taps32);
+    span_free(ec->fir_taps16);
+    span_free(ec);
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(modem_echo_can_segment_state_t *) modem_echo_can_segment_init(int len)
+{
+    modem_echo_can_segment_state_t *ec;
+
+    if ((ec = (modem_echo_can_segment_state_t *) span_alloc(sizeof(*ec))) == NULL)
+        return NULL;
+    memset(ec, 0, sizeof(*ec));
+    ec->taps = len;
+    ec->curr_pos = ec->taps - 1;
+    if ((ec->fir_taps32 = (int32_t *) span_alloc(ec->taps*sizeof(int32_t))) == NULL)
+    {
+        span_free(ec);
+        return NULL;
+    }
+    /*endif*/
+    memset(ec->fir_taps32, 0, ec->taps*sizeof(int32_t));
+    if ((ec->fir_taps16 = (int16_t *) span_alloc(ec->taps*sizeof(int16_t))) == NULL)
+    {
+        span_free(ec->fir_taps32);
+        span_free(ec);
+        return NULL;
+    }
+    /*endif*/
+    memset(ec->fir_taps16, 0, ec->taps*sizeof(int16_t));
+    if (fir16_create(&ec->fir_state, ec->fir_taps16, ec->taps) == NULL)
+    {
+        span_free(ec->fir_taps16);
+        span_free(ec->fir_taps32);
+        span_free(ec);
+        return NULL;
+    }
+    /*endif*/
+    return ec;
 }
 /*- End of function --------------------------------------------------------*/
 /*- End of file ------------------------------------------------------------*/
