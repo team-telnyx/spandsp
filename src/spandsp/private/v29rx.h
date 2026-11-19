@@ -45,12 +45,12 @@ struct v29_rx_state_s
     /*! \brief The bit rate of the modem. Valid values are 4800, 7200 and 9600. */
     int bit_rate;
     /*! \brief The callback function used to put each bit received. */
-    put_bit_func_t put_bit;
+    span_put_bit_func_t put_bit;
     /*! \brief A user specified opaque pointer passed to the put_bit routine. */
     void *put_bit_user_data;
 
     /*! \brief The callback function used to report modem status changes. */
-    modem_status_func_t status_handler;
+    span_modem_status_func_t status_handler;
     /*! \brief A user specified opaque pointer passed to the status function. */
     void *status_user_data;
 
@@ -75,15 +75,6 @@ struct v29_rx_state_s
     complexi16_t eq_coeff_save[V29_EQUALIZER_LEN];
     /*! \brief The equalizer signal buffer. */
     complexi16_t eq_buf[V29_EQUALIZER_LEN];
-
-    /*! Low band edge filter for symbol sync. */
-    int32_t symbol_sync_low[2];
-    /*! High band edge filter for symbol sync. */
-    int32_t symbol_sync_high[2];
-    /*! DC filter for symbol sync. */
-    int32_t symbol_sync_dc_filter[2];
-    /*! Baud phase for symbol sync. */
-    int32_t baud_phase;
 
     /*! \brief A measure of how much mismatch there is between the real constellation,
                and the decoded symbol positions. */
@@ -110,15 +101,6 @@ struct v29_rx_state_s
     /*! \brief The equalizer signal buffer. */
     complexf_t eq_buf[V29_EQUALIZER_LEN];
 
-    /*! Low band edge filter for symbol sync. */
-    float symbol_sync_low[2];
-    /*! High band edge filter for symbol sync. */
-    float symbol_sync_high[2];
-    /*! DC filter for symbol sync. */
-    float symbol_sync_dc_filter[2];
-    /*! Baud phase for symbol sync. */
-    float baud_phase;
-
     /*! \brief A measure of how much mismatch there is between the real constellation,
                and the decoded symbol positions. */
     float training_error;
@@ -130,6 +112,8 @@ struct v29_rx_state_s
     /*! \brief The root raised cosine (RRC) pulse shaping filter buffer. */
     float rrc_filter[V29_RX_FILTER_STEPS];
 #endif
+    godard_ted_state_t godard;
+
     /*! \brief Current offset into the RRC pulse shaping filter buffer. */
     int rrc_filter_step;
 
@@ -179,10 +163,6 @@ struct v29_rx_state_s
 
     /*! \brief The current half of the baud. */
     int baud_half;
-
-    /*! \brief The total symbol timing correction since the carrier came up.
-               This is only for performance analysis purposes. */
-    int total_baud_timing_correction;
 
     /*! \brief The previous symbol phase angles for the coarse carrier aquisition step. */
     int32_t last_angles[2];

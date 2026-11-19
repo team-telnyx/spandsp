@@ -183,45 +183,68 @@ Note - Manufacturers may wish to note that in certain countries, for national pu
 V.22bis to V.22bis
 ------------------
 Calling party
-                                                           S1       scrambled 1's                  scrambled 1's  data
-                                                                    at 1200bps                     at 2400bps
-|---------------------------------------------------------|XXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXX|XXXXXXXXXXXXX
-                                      |<155+-10>|<456+-10>|<100+-3>|        |<------600+-10------>|<---200+-10-->|
-                                      ^                            |        ^<----450+-100---->|[16 way decisions begin]
+                                                           S1      Scrambled 1's                    Scrambled 1's   Data rx and tx enabled
+                                                                   at 1200bps                       at 2400bps
+|---------------------------------------------------------|XXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXX
+                                      |<155+-10>|<456+-10>|<100+-3>|        |<-------600+-10------->|<---200+-10--->|
+                                      |         |                  |        |<---450+-100--->|[16 way decisions begin in receiver]
                                       |                            |        |
-                                      |                            v        |
-                                      |                            |<------450+-100----->|[16 way decisions begin]
+                                      ^                            v        ^
+                                      |                            |<------450+-100----->|[16 way decisions begin in receiver]
                                       |                            |<----------600+-10-------->|
-  |<2150+-350>|<--3300+-700->|<75+-20>|                            |<100+-3>|                  |<---200+-10-->
-  |-----------|XXXXXXXXXXXXXX|--------|XXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXX|XXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXX|XXXXXXXXXXXXX
-   silence    2100Hz                   unscrambled 1's              S1       scrambled 1's      scrambled 1's  data
+  |<2150+-350>|<--3300+-700->|<75+-20>|                            |<100+-3>|                  |<----200+-10--->|
+  |-----------|XXXXXXXXXXXXXX|--------|XXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXX|XXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXX
+   silence    2100Hz                   Unscrambled 1's              S1       Scrambled 1's      Scrambled 1's   Data rx and tx enabled
                                        at 1200bps                            at 1200bps         at 2400bps
 Answering party
 
 S1 = Unscrambled double dibit 00 and 11 at 1200bps
+155+-10ms to qualify the answer tone. A further 456+-10ms wait before beginning to transmit
+Both ends should accept unscrambled binary 1 or binary 0 as the preamble.
 When the 2400bps section starts, both sides should look for 32 bits of continuous ones, as a test of integrity.
 
+
+
+
+V.22bis to V.22bis retrain initiated by the S1 signal
+-----------------------------------------------------
+Modem requesting retrain
+Normal operation     S1       Scrambled 1's                      Scrambled 1's   Data rx and tx enabled
+                              at 1200bps                         at 2400bps
+XXXXXXXXXXXXXXXXXXXXX|XXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXX
+                     |<100+-3>|        |<--------600+-10-------->|<---200+-10--->|
+                              |        |<----450+-100---->|[16 way decisions begin in receiver]
+                              |        |
+                              v        ^
+                              |<------450+-100----->|[16 way decisions begin in receiver]
+                              |<----------600+-10-------->|
+                              |<100+-3>|                  |<---200+-10--->|
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXX|XXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXXXX
+Normal operation              S1       Scrambled 1's      Scrambled 1's   Data rx and tx enabled
+                                       at 1200bps         at 2400bps
+Modem responding to request for retrain
 
 
 
 V.22 to V.22bis
 ---------------
 Calling party
-                                                           scrambled 1's                                 data
-                                                           at 1200bps
-|---------------------------------------------------------|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXX
-                                      |<155+-10>|<456+-10>|         |<270+-40>|<--------765+-10-------->|
-                                      ^                   |         ^
+                                                          Scrambled 1's         Data rx enabled           Data tx enabled
+                                                          at 1200bps
+|---------------------------------------------------------|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXX
+                                      |<155+-10>|<456+-10>|         |<-270+-40->|<--------765+-10-------->|
                                       |                   |         |
                                       |                   |         |
+                                      ^                   v         ^
                                       |                   |         |
-                                      |                   v         |
-  |<2150+-350>|<--3300+-700->|<75+-20>|                   |<270+-40>|<---------765+-10-------->|
-  |-----------|XXXXXXXXXXXXXX|--------|XXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXX
-   silence    2100Hz                   unscrambled 1's                scrambled 1's             data
-                                       at 1200bps                     at 1200bps
+                                      |                   |         |
+  |<2150+-350>|<--3300+-700->|<75+-20>|                   |<270+-40>|<---------765+-10---------->|
+  |-----------|XXXXXXXXXXXXXX|--------|XXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXX
+   silence    2100Hz                  Unscrambled 1's               Scrambled 1's                Data rx and tx enabled
+                                      at 1200bps                    at 1200bps
 Answering party
 
+155+-10ms to qualify the answer tone. A further 456+-10ms wait before beginning to transmit
 Both ends should accept unscrambled binary 1 or binary 0 as the preamble.
 
 
@@ -230,25 +253,127 @@ Both ends should accept unscrambled binary 1 or binary 0 as the preamble.
 V.22bis to V.22
 ---------------
 Calling party
-                                                           S1      scrambled 1's                                 data
+                                                          S1       Scrambled 1's           Data rx enabled      Data tx enabled
                                                                    at 1200bps
-|---------------------------------------------------------|XXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXX
-                                      |<155+-10>|<456+-10>|<100+-3>|           |<-270+-40-><------765+-10------>|
-                                      ^                            |           ^
+|---------------------------------------------------------|XXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXX
+                                      |<155+-10>|<456+-10>|<100+-3>|           |<-270+-40->|<-----765+-10------>|
+                                      |         |                  |           |
                                       |                            |           |
-                                      |                            v           |
-                                      |                            |
-                                      |                            |
+                                      ^                            v           ^
+                                      |                            |           |
+                                      |                            |           |
   |<2150+-350>|<--3300+-700->|<75+-20>|                            |<-270+-40->|<------765+-10----->|
-  |-----------|XXXXXXXXXXXXXX|--------|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXX
-   silence    2100Hz                   unscrambled 1's                          scrambled 1's        data
-                                       at 1200bps                               at 1200bps
+  |-----------|XXXXXXXXXXXXXX|--------|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXX
+   silence    2100Hz                  Unscrambled 1's                          Scrambled 1's        Data rx and tx enabled
+                                      at 1200bps                               at 1200bps
 Answering party
 
+S1 = Unscrambled double dibit 00 and 11 at 1200bps
+155+-10ms to qualify the answer tone. A further 456+-10ms wait before beginning to transmit
 Both ends should accept unscrambled binary 1 or binary 0 as the preamble.
+
+
+
+
+V.22 to V.22 (1200bps to 1200bps)
+---------------------------------
+Calling party
+                                                          Scrambled 1's           Data rx enabled      Data tx enabled
+|---------------------------------------------------------|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXX
+                                      |<155+-10>|<456+-10>|           |<-270+-40->|<-----765+-10------>|
+                                      |         |         |           |
+                                      |                   |           |
+                                      ^                   v           ^
+                                      |                   |           |
+                                      |                   |           |
+  |<2150+-350>|<--3300+-700->|<75+-20>|                   |<-270+-40->|<------765+-10----->|
+  |-----------|XXXXXXXXXXXXXX|--------|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXX
+  Silence     2100Hz                  Unscrambled 1's                 Scrambled 1's        Data rx and tx enabled
+Answering party
+
+155+-10ms to qualify the answer tone. A further 456+-10ms wait before beginning to transmit
+Both ends should accept unscrambled binary 1 or binary 0 as the preamble.
+
+
+
+
+V.22 to V.22 (1200bps to 1200bps) without V.25 auto-answer sequence
+-------------------------------------------------------------------
+Calling party
+                        Scrambled 1's           Data rx enabled           Data tx enabled
+|-----------------------|XXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXX
+|<155+-10>|<--456+-10-->|           |<-270+-40->|<--------765+-10-------->|
+|         |             |           |
+|                       |           |
+^                       v           ^
+|                       |           |
+|                       |           |
+|                       |<-270+-40->|<---------765+-10-------->|
+|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXX
+Unscrambled 1's                     Scrambled 1's              Data rx and tx enabled
+Answering party
+
+155+-10ms to qualify the answer tone. A further 456+-10ms wait before beginning to transmit
+Both ends should accept unscrambled binary 1 or binary 0 as the preamble.
+
+
+
+
+Bell212A to Bell212A (1200bps to 1200bps)
+-----------------------------------------
+Calling party
+                                      Scrambled 1's           Data rx enabled           Data tx enabled
+|-------------------------------------|XXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXX
+              |<155+-50>|<--456+-10-->|           |<-270+-40->|<--------765+-10-------->|
+              |         |    ----     |           |
+              |     ----              |           |
+              ^         ----          v           ^
+              |             ----      |           |
+              |        ----           |           |
+|<----2000--->|            ----       |<-270+-40->|<---------765+-10-------->|
+|-------------|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXX
+Silence       2225Hz                              Scrambled 1's              Data rx and tx enabled
+Answering party
+
+155+-10ms to qualify the answer tone. A further 456+-10ms wait before beginning to transmit
+Initial 2s delay by the answering party is termed the billing delay.
+Both ends should accept unscrambled binary 1 or binary 0 as the preamble.
+
+
+
+
+S1 = Unscrambled double dibit 00 and 11 at 1200bps
+Both ends should accept unscrambled binary 1 or binary 0 as the preamble.
+When the 2400bps section starts, both sides should look for 32 bits of continuous ones, as a test of integrity.
+
+V.22 defines some alternatives modem configurations.
+
+Alternative A - synchronous only
+    The modem can be configured for the following modes of operation:
+        Mode i)     1200 bit/s synchronous
+        Mode iii)   600 bit/s synchronous (optional).
+        
+Alternative B - mixed synchronous and asynchronous
+    The modem can be configured for the following modes of operation:
+        Mode i)     1200 bit/s ± 0.01% synchronous
+        Mode ii)    1200 bit/s start-stop 8, 9, 10 or 11 bits per character
+        Mode iii)   600 bit/s ± 0.01% synchronous optional (optional)
+        Mode iv)    600 bit/s start-stop 8, 9, 10 or 11 bits per character (optional)
+
+Alternative C - mixed synchronous and asynchronous, with an extra low speed mode
+    The modem can be configured for the following modes of operation.
+        Mode i)     1200 bit/s ± 0.01% synchronous
+        Mode ii)    1200 bit/s start-stop 8, 9, 10 or 11 bits per character
+        Mode iii)   600 bit/s ± 0.01% synchronous optional (optional)
+        Mode iv)    600 bit/s start-stop 8, 9, 10 or 11 bits per character (optional)
+        Mode v)     An asynchronous mode having capability of handling 1200 bit/s start-stop and
+                    anisochronous data at up to 300 bps.
 */
 
-#define ms_to_symbols(t)    (((t)*600)/1000)
+#define ms_to_symbols(t)                (((t)*600)/1000)
+
+#define LOW_CARRIER_FREQUENCY           1200.0f
+#define HIGH_CARRIER_FREQUENCY          2400.0f
 
 static const int phase_steps[4] =
 {
@@ -294,6 +419,7 @@ static __inline__ int scramble(v22bis_state_t *s, int bit)
         bit ^= 1;
         s->tx.scrambler_pattern_count = 0;
     }
+    /*endif*/
     out_bit = (bit ^ (s->tx.scramble_reg >> 13) ^ (s->tx.scramble_reg >> 16)) & 1;
     s->tx.scramble_reg = (s->tx.scramble_reg << 1) | out_bit;
 
@@ -301,6 +427,7 @@ static __inline__ int scramble(v22bis_state_t *s, int bit)
         s->tx.scrambler_pattern_count++;
     else
         s->tx.scrambler_pattern_count = 0;
+    /*endif*/
     return out_bit;
 }
 /*- End of function --------------------------------------------------------*/
@@ -317,6 +444,7 @@ static __inline__ int get_scrambled_bit(v22bis_state_t *s)
         s->tx.shutdown = 1;
         bit = 1;
     }
+    /*endif*/
     return scramble(s, bit);
 }
 /*- End of function --------------------------------------------------------*/
@@ -342,19 +470,35 @@ static complexf_t training_get(v22bis_state_t *s)
         if (++s->tx.training_count >= ms_to_symbols(75))
         {
             /* Initial 75ms of silence is over */
-            span_log(&s->logging, SPAN_LOG_FLOW, "+++ starting U11 1200\n");
             s->tx.training_count = 0;
-            s->tx.training = V22BIS_TX_TRAINING_STAGE_U11;
+            if ((s->options & V22BIS_USE_U00))
+            {
+                span_log(&s->logging, SPAN_LOG_FLOW, "+++ starting U00 1200\n");
+                s->tx.training = V22BIS_TX_TRAINING_STAGE_U00;
+            }
+            else
+            {
+                span_log(&s->logging, SPAN_LOG_FLOW, "+++ starting U11 1200\n");
+                s->tx.training = V22BIS_TX_TRAINING_STAGE_U11;
+            }
+            /*endif*/
         }
-        /* Fall through */
+        /*endif*/
+        s->tx.constellation_state = 0;
+        return zero;
     case V22BIS_TX_TRAINING_STAGE_INITIAL_SILENCE:
-        /* Silence */
         s->tx.constellation_state = 0;
         return zero;
     case V22BIS_TX_TRAINING_STAGE_U11:
         /* Send continuous unscrambled ones at 1200bps (i.e. 270 degree phase steps). */
         /* Only the answering modem sends unscrambled ones. It is the first thing exchanged between the modems. */
         s->tx.constellation_state = (s->tx.constellation_state + phase_steps[3]) & 3;
+        return v22bis_constellation[(s->tx.constellation_state << 2) | 0x01];
+    case V22BIS_TX_TRAINING_STAGE_U00:
+        /* Send continuous unscrambled zeroes at 1200bps (i.e. 90 degree phase steps). */
+        /* This is not part of V.22bis. It exists only for testing that the receiving modem functions
+           correctly with both unscrambled zeroes and unscarmbled ones. */
+        s->tx.constellation_state = (s->tx.constellation_state + phase_steps[0]) & 3;
         return v22bis_constellation[(s->tx.constellation_state << 2) | 0x01];
     case V22BIS_TX_TRAINING_STAGE_U0011:
         /* Continuous unscrambled double dibit 00 11 at 1200bps. This is termed the S1 segment in
@@ -374,7 +518,9 @@ static complexf_t training_get(v22bis_state_t *s)
                 s->tx.training_count = ms_to_symbols(756 - (600 - 100));
                 s->tx.training = V22BIS_TX_TRAINING_STAGE_TIMED_S11;
             }
+            /*endif*/
         }
+        /*endif*/
         return v22bis_constellation[(s->tx.constellation_state << 2) | 0x01];
     case V22BIS_TX_TRAINING_STAGE_TIMED_S11:
         /* A timed period of scrambled ones at 1200bps. */
@@ -394,7 +540,9 @@ static complexf_t training_get(v22bis_state_t *s)
                 v22bis_report_status_change(s, SIG_STATUS_TRAINING_SUCCEEDED);
                 s->tx.current_get_bit = s->get_bit;
             }
+            /*endif*/
         }
+        /*endif*/
         /* Fall through */
     case V22BIS_TX_TRAINING_STAGE_S11:
         /* Scrambled ones at 1200bps. */
@@ -418,8 +566,10 @@ static complexf_t training_get(v22bis_state_t *s)
             v22bis_report_status_change(s, SIG_STATUS_TRAINING_SUCCEEDED);
             s->tx.current_get_bit = s->get_bit;
         }
+        /*endif*/
         return v22bis_constellation[(s->tx.constellation_state << 2) | bits];
     }
+    /*endswitch*/
     return zero;
 }
 /*- End of function --------------------------------------------------------*/
@@ -442,6 +592,7 @@ static complexf_t getbaud(v22bis_state_t *s)
         /* Send the training sequence */
         return training_get(s);
     }
+    /*endif*/
 
     /* There is no graceful shutdown procedure defined for V.22bis. Just
        send some ones, to ensure we get the real data bits through, even
@@ -450,7 +601,9 @@ static complexf_t getbaud(v22bis_state_t *s)
     {
         if (++s->tx.shutdown > 10)
             return zero;
+        /*endif*/
     }
+    /*endif*/
     /* The first two bits define the quadrant */
     bits = get_scrambled_bit(s);
     bits = (bits << 1) | get_scrambled_bit(s);
@@ -465,6 +618,7 @@ static complexf_t getbaud(v22bis_state_t *s)
         bits = get_scrambled_bit(s);
         bits = (bits << 1) | get_scrambled_bit(s);
     }
+    /*endif*/
     return v22bis_constellation[(s->tx.constellation_state << 2) | bits];
 }
 /*- End of function --------------------------------------------------------*/
@@ -486,6 +640,7 @@ SPAN_DECLARE(int) v22bis_tx(v22bis_state_t *s, int16_t amp[], int len)
 
     if (s->tx.shutdown > 10)
         return 0;
+    /*endif*/
     for (sample = 0;  sample < len;  sample++)
     {
         if ((s->tx.baud_phase += 3) >= 40)
@@ -496,7 +651,9 @@ SPAN_DECLARE(int) v22bis_tx(v22bis_state_t *s, int16_t amp[], int len)
             s->tx.rrc_filter_im[s->tx.rrc_filter_step] = v.im;
             if (++s->tx.rrc_filter_step >= V22BIS_TX_FILTER_STEPS)
                 s->tx.rrc_filter_step = 0;
+            /*endif*/
         }
+        /*endif*/
 #if defined(SPANDSP_USE_FIXED_POINT)
         /* Root raised cosine pulse shaping at baseband */
         x.re = vec_circular_dot_prodi16(s->tx.rrc_filter_re, tx_pulseshaper[TX_PULSESHAPER_COEFF_SETS - 1 - s->tx.baud_phase], V22BIS_TX_FILTER_STEPS, s->tx.rrc_filter_step) >> 14;
@@ -505,11 +662,12 @@ SPAN_DECLARE(int) v22bis_tx(v22bis_state_t *s, int16_t amp[], int len)
         z = dds_complexi32(&s->tx.carrier_phase, s->tx.carrier_phase_rate);
         iamp = (x.re*z.re - x.im*z.im) >> 15;
         iamp = (int16_t) (((int32_t) iamp*s->tx.gain) >> 11);
-        if (s->tx.guard_phase_rate  &&  (s->tx.rrc_filter_re[s->tx.rrc_filter_step] != 0  ||  s->tx.rrc_filter_im[s->tx.rrc_filter_step] != 0))
+        if (s->tx.guard_tone_phase_rate  &&  (s->tx.rrc_filter_re[s->tx.rrc_filter_step] != 0  ||  s->tx.rrc_filter_im[s->tx.rrc_filter_step] != 0))
         {
             /* Add the guard tone */
-            iamp += dds_mod(&s->tx.guard_phase, s->tx.guard_phase_rate, s->tx.guard_tone_gain, 0);
+            iamp += dds_mod(&s->tx.guard_tone_phase, s->tx.guard_tone_phase_rate, s->tx.guard_tone_gain, 0);
         }
+        /*endif*/
         /* Don't bother saturating. We should never clip. */
         amp[sample] = iamp;
 #else
@@ -519,15 +677,17 @@ SPAN_DECLARE(int) v22bis_tx(v22bis_state_t *s, int16_t amp[], int len)
         /* Now create and modulate the carrier */
         z = dds_complexf(&s->tx.carrier_phase, s->tx.carrier_phase_rate);
         famp = (x.re*z.re - x.im*z.im)*s->tx.gain;
-        if (s->tx.guard_phase_rate  &&  (s->tx.rrc_filter_re[s->tx.rrc_filter_step] != 0.0f  ||  s->tx.rrc_filter_im[s->tx.rrc_filter_step] != 0.0f))
+        if (s->tx.guard_tone_phase_rate  &&  (s->tx.rrc_filter_re[s->tx.rrc_filter_step] != 0.0f  ||  s->tx.rrc_filter_im[s->tx.rrc_filter_step] != 0.0f))
         {
             /* Add the guard tone */
-            famp += dds_modf(&s->tx.guard_phase, s->tx.guard_phase_rate, s->tx.guard_tone_gain, 0);
+            famp += dds_modf(&s->tx.guard_tone_phase, s->tx.guard_tone_phase_rate, s->tx.guard_tone_gain, 0);
         }
+        /*endif*/
         /* Don't bother saturating. We should never clip. */
         amp[sample] = (int16_t) lfastrintf(famp);
 #endif
     }
+    /*endfor*/
     return sample;
 }
 /*- End of function --------------------------------------------------------*/
@@ -541,12 +701,12 @@ SPAN_DECLARE(void) v22bis_tx_power(v22bis_state_t *s, float power)
 
     /* If is there is a guard tone we need to scale down the signal power a bit, so the aggregate of the signal
        and guard tone power is the specified power. */
-    if (s->tx.guard_phase_rate == dds_phase_ratef(550.0f))
+    if (s->tx.guard_tone_phase_rate == dds_phase_ratef(550.0f))
     {
         sig_power = power - 1.0f;
         guard_tone_power = sig_power - 3.0f;
     }
-    else if(s->tx.guard_phase_rate == dds_phase_ratef(1800.0f))
+    else if (s->tx.guard_tone_phase_rate == dds_phase_ratef(1800.0f))
     {
         sig_power = power - 0.55f;
         guard_tone_power = sig_power - 6.0f;
@@ -556,8 +716,9 @@ SPAN_DECLARE(void) v22bis_tx_power(v22bis_state_t *s, float power)
         sig_power = power;
         guard_tone_power = -9999.0f;
     }
-    sig_gain = 0.4490f*powf(10.0f, (sig_power - DBM0_MAX_POWER)/20.0f)*32768.0f/TX_PULSESHAPER_GAIN;
-    guard_tone_gain = powf(10.0f, (guard_tone_power - DBM0_MAX_POWER)/20.0f)*32768.0f;
+    /*endif*/
+    sig_gain = 0.4490f*db_to_amplitude_ratio(sig_power - DBM0_MAX_SINE_POWER)*32768.0f/TX_PULSESHAPER_GAIN;
+    guard_tone_gain = db_to_amplitude_ratio(guard_tone_power - DBM0_MAX_SINE_POWER)*32768.0f;
 #if defined(SPANDSP_USE_FIXED_POINT)
     s->tx.gain = (int16_t) sig_gain;
     s->tx.guard_tone_gain = (int16_t) guard_tone_gain;
@@ -584,9 +745,10 @@ static int v22bis_tx_restart(v22bis_state_t *s)
         s->tx.training = V22BIS_TX_TRAINING_STAGE_INITIAL_SILENCE;
     else
         s->tx.training = V22BIS_TX_TRAINING_STAGE_INITIAL_TIMED_SILENCE;
+    /*endif*/
     s->tx.training_count = 0;
     s->tx.carrier_phase = 0;
-    s->tx.guard_phase = 0;
+    s->tx.guard_tone_phase = 0;
     s->tx.baud_phase = 0;
     s->tx.constellation_state = 0;
     s->tx.current_get_bit = fake_get_bit;
@@ -595,21 +757,21 @@ static int v22bis_tx_restart(v22bis_state_t *s)
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(void) v22bis_set_get_bit(v22bis_state_t *s, get_bit_func_t get_bit, void *user_data)
+SPAN_DECLARE(void) v22bis_set_get_bit(v22bis_state_t *s, span_get_bit_func_t get_bit, void *user_data)
 {
     s->get_bit = get_bit;
     s->get_bit_user_data = user_data;
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(void) v22bis_set_put_bit(v22bis_state_t *s, put_bit_func_t put_bit, void *user_data)
+SPAN_DECLARE(void) v22bis_set_put_bit(v22bis_state_t *s, span_put_bit_func_t put_bit, void *user_data)
 {
     s->put_bit = put_bit;
     s->put_bit_user_data = user_data;
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(void) v22bis_set_modem_status_handler(v22bis_state_t *s, modem_status_func_t handler, void *user_data)
+SPAN_DECLARE(void) v22bis_set_modem_status_handler(v22bis_state_t *s, span_modem_status_func_t handler, void *user_data)
 {
     s->status_handler = handler;
     s->status_user_data = user_data;
@@ -632,10 +794,12 @@ SPAN_DECLARE(int) v22bis_restart(v22bis_state_t *s, int bit_rate)
     default:
         return -1;
     }
+    /*endswitch*/
     s->bit_rate = bit_rate;
     s->negotiated_bit_rate = 1200;
     if (v22bis_tx_restart(s))
         return -1;
+    /*endif*/
     return v22bis_rx_restart(s);
 }
 /*- End of function --------------------------------------------------------*/
@@ -651,8 +815,9 @@ SPAN_DECLARE(int) v22bis_request_retrain(v22bis_state_t *s, int bit_rate)
     default:
         return -1;
     }
+    /*endswitch*/
     /* TODO: support bit rate changes */
-    /* Retrain is only valid when we are normal operation at 2400bps */
+    /* Retrain is only valid when we are in normal operation at 2400bps */
     if (s->rx.training != V22BIS_RX_TRAINING_STAGE_NORMAL_OPERATION
         ||
         s->tx.training != V22BIS_TX_TRAINING_STAGE_NORMAL_OPERATION
@@ -661,6 +826,7 @@ SPAN_DECLARE(int) v22bis_request_retrain(v22bis_state_t *s, int bit_rate)
     {
         return -1;
     }
+    /*endif*/
     /* Send things back into the training process at the appropriate point.
        The far end should detect the S1 signal, and reciprocate. */
     span_log(&s->logging, SPAN_LOG_FLOW, "+++ Initiating a retrain\n");
@@ -690,11 +856,11 @@ SPAN_DECLARE(int) v22bis_get_current_bit_rate(v22bis_state_t *s)
 
 SPAN_DECLARE(v22bis_state_t *) v22bis_init(v22bis_state_t *s,
                                            int bit_rate,
-                                           int guard,
+                                           int options,
                                            bool calling_party,
-                                           get_bit_func_t get_bit,
+                                           span_get_bit_func_t get_bit,
                                            void *get_bit_user_data,
-                                           put_bit_func_t put_bit,
+                                           span_put_bit_func_t put_bit,
                                            void *put_bit_user_data)
 {
     switch (bit_rate)
@@ -705,11 +871,14 @@ SPAN_DECLARE(v22bis_state_t *) v22bis_init(v22bis_state_t *s,
     default:
         return NULL;
     }
+    /*endswitch*/
     if (s == NULL)
     {
         if ((s = (v22bis_state_t *) span_alloc(sizeof(*s))) == NULL)
             return NULL;
+        /*endif*/
     }
+    /*endif*/
     memset(s, 0, sizeof(*s));
     span_log_init(&s->logging, SPAN_LOG_NONE, NULL);
     span_log_set_protocol(&s->logging, "V.22bis");
@@ -723,24 +892,27 @@ SPAN_DECLARE(v22bis_state_t *) v22bis_init(v22bis_state_t *s,
 
     if (s->calling_party)
     {
-        s->tx.carrier_phase_rate = dds_phase_ratef(1200.0f);
+        s->tx.carrier_phase_rate = dds_phase_ratef(LOW_CARRIER_FREQUENCY);
     }
     else
     {
-        s->tx.carrier_phase_rate = dds_phase_ratef(2400.0f);
-        switch (guard)
+        s->tx.carrier_phase_rate = dds_phase_ratef(HIGH_CARRIER_FREQUENCY);
+        s->options = options;
+        switch ((options & 0xFF))
         {
         case V22BIS_GUARD_TONE_550HZ:
-            s->tx.guard_phase_rate = dds_phase_ratef(550.0f);
+            s->tx.guard_tone_phase_rate = dds_phase_ratef(550.0f);
             break;
         case V22BIS_GUARD_TONE_1800HZ:
-            s->tx.guard_phase_rate = dds_phase_ratef(1800.0f);
+            s->tx.guard_tone_phase_rate = dds_phase_ratef(1800.0f);
             break;
         default:
-            s->tx.guard_phase_rate = 0;
+            s->tx.guard_tone_phase_rate = 0;
             break;
         }
+        /*endswitch*/
     }
+    /*endif*/
     v22bis_tx_power(s, -14.0f);
     v22bis_restart(s, s->bit_rate);
     return s;

@@ -89,7 +89,7 @@ static const struct
 bool decode_test = false;
 int rx_bits = 0;
 
-t30_state_t t30_dummy;
+logging_state_t *t30_log;
 t4_rx_state_t t4_rx_state;
 bool t4_up = false;
 
@@ -108,6 +108,34 @@ int octets_per_ecm_frame = 256;
 bool error_correcting_mode = false;
 int current_fallback = 0;
 bool end_of_page_detected = false;
+
+fsk_rx_state_t *fsk;
+v17_rx_state_t *v17_14400;
+v17_rx_state_t *v17_12000;
+v17_rx_state_t *v17_9600;
+v17_rx_state_t *v17_7200;
+v29_rx_state_t *v29_9600;
+v29_rx_state_t *v29_7200;
+v27ter_rx_state_t *v27ter_4800;
+v27ter_rx_state_t *v27ter_2400;
+
+int v17_14400_zeros = 0;
+int v17_12000_zeros = 0;
+int v17_9600_zeros = 0;
+int v17_7200_zeros = 0;
+int v29_9600_zeros = 0;
+int v29_7200_zeros = 0;
+int v27ter_4800_zeros = 0;
+int v27ter_2400_zeros = 0;
+
+int v17_14400_max_zeros = 0;
+int v17_12000_max_zeros = 0;
+int v17_9600_max_zeros = 0;
+int v17_7200_max_zeros = 0;
+int v29_9600_max_zeros = 0;
+int v29_7200_max_zeros = 0;
+int v27ter_4800_max_zeros = 0;
+int v27ter_2400_max_zeros = 0;
 
 static void decode_20digit_msg(const uint8_t *pkt, int len)
 {
@@ -147,9 +175,7 @@ static void print_frame(const char *io, const uint8_t *fr, int frlen)
     const char *model;
 
     if (frlen == 0)
-    {
         return;
-    }
     /*endif*/
     fprintf(stderr, "%s %s:", io, t30_frametype(fr[2]));
     for (i = 2;  i < frlen;  i++)
@@ -161,7 +187,7 @@ static void print_frame(const char *io, const uint8_t *fr, int frlen)
     type = fr[2] & 0xFE;
     if (type == T30_DIS  ||  type == T30_DTC  ||  type == T30_DCS)
     {
-        t30_decode_dis_dtc_dcs(&t30_dummy, fr, frlen);
+        t30_log_dis_dtc_dcs(t30_log, fr, frlen);
     }
     /*endif*/
     if (type == T30_CSI  ||  type == T30_TSI  ||  type == T30_PWD  ||  type == T30_SEP  ||  type == T30_SUB  ||  type == T30_SID)
@@ -329,6 +355,12 @@ static void hdlc_accept(void *user_data, const uint8_t *msg, int len, int ok)
             break;
         case T30_DCS:
             check_rx_dcs(msg, len);
+            /* Need to ensure we go back to long training */
+            fprintf(stderr, "Return to long training\n");
+            v17_rx_restart(v17_14400, 14400, false);
+            v17_rx_restart(v17_12000, 12000, false);
+            v17_rx_restart(v17_9600, 9600, false);
+            v17_rx_restart(v17_7200, 7200, false);
             break;
         }
         /*endswitch*/
@@ -420,7 +452,7 @@ static void v21_put_bit(void *user_data, int bit)
 }
 /*- End of function --------------------------------------------------------*/
 
-static void v17_put_bit(void *user_data, int bit)
+static void v17_14400_put_bit(void *user_data, int bit)
 {
     if (bit < 0)
     {
@@ -430,16 +462,34 @@ static void v17_put_bit(void *user_data, int bit)
         {
         case SIG_STATUS_TRAINING_SUCCEEDED:
             fast_trained = FAX_V17_RX;
+            v17_14400_max_zeros = 0;
+            v17_14400_zeros = 0;
             t4_begin();
             break;
         case SIG_STATUS_CARRIER_DOWN:
             t4_end();
             if (fast_trained == FAX_V17_RX)
                 fast_trained = FAX_NONE;
+            /*endif*/
+            fprintf(stderr, "Max V.17 14400 max zeros = %d\n", v17_14400_max_zeros);
+            v17_14400_max_zeros = 0;
+            v17_14400_zeros = 0;
             break;
         }
         /*endswitch*/
         return;
+    }
+    /*endif*/
+    if (bit == 0)
+    {
+        v17_14400_zeros++;
+    }
+    else
+    {
+        if (v17_14400_zeros > v17_14400_max_zeros)
+            v17_14400_max_zeros = v17_14400_zeros;
+        /*endif*/
+        v17_14400_zeros = 0;
     }
     /*endif*/
     if (error_correcting_mode)
@@ -463,7 +513,190 @@ static void v17_put_bit(void *user_data, int bit)
 }
 /*- End of function --------------------------------------------------------*/
 
-static void v29_put_bit(void *user_data, int bit)
+static void v17_12000_put_bit(void *user_data, int bit)
+{
+    if (bit < 0)
+    {
+        /* Special conditions */
+        fprintf(stderr, "V.17 rx status is %s (%d)\n", signal_status_to_str(bit), bit);
+        switch (bit)
+        {
+        case SIG_STATUS_TRAINING_SUCCEEDED:
+            fast_trained = FAX_V17_RX;
+            t4_begin();
+            v17_12000_max_zeros = 0;
+            v17_12000_zeros = 0;
+            break;
+        case SIG_STATUS_CARRIER_DOWN:
+            t4_end();
+            if (fast_trained == FAX_V17_RX)
+                fast_trained = FAX_NONE;
+            /*endif*/
+            fprintf(stderr, "Max V.17 12000 max zeros = %d\n", v17_12000_max_zeros);
+            v17_12000_max_zeros = 0;
+            v17_12000_zeros = 0;
+            break;
+        }
+        /*endswitch*/
+        return;
+    }
+    /*endif*/
+    if (bit == 0)
+    {
+        v17_12000_zeros++;
+    }
+    else
+    {
+        if (v17_12000_zeros > v17_12000_max_zeros)
+            v17_12000_max_zeros = v17_12000_zeros;
+        /*endif*/
+        v17_12000_zeros = 0;
+    }
+    /*endif*/
+    if (error_correcting_mode)
+    {
+        hdlc_rx_put_bit(&hdlcrx, bit);
+    }
+    else
+    {
+        if (t4_rx_put_bit(&t4_rx_state, bit))
+        {
+            t4_end();
+            if (!end_of_page_detected)
+                fprintf(stderr, "End of page detected\n");
+            /*endif*/
+            end_of_page_detected = true;
+        }
+        /*endif*/
+    }
+    /*endif*/
+    //printf("V.17 Rx bit %d - %d\n", rx_bits++, bit);
+}
+/*- End of function --------------------------------------------------------*/
+
+static void v17_9600_put_bit(void *user_data, int bit)
+{
+    if (bit < 0)
+    {
+        /* Special conditions */
+        fprintf(stderr, "V.17 rx status is %s (%d)\n", signal_status_to_str(bit), bit);
+        switch (bit)
+        {
+        case SIG_STATUS_TRAINING_SUCCEEDED:
+            fast_trained = FAX_V17_RX;
+            v17_9600_max_zeros = 0;
+            v17_9600_zeros = 0;
+            t4_begin();
+            break;
+        case SIG_STATUS_CARRIER_DOWN:
+            t4_end();
+            if (fast_trained == FAX_V17_RX)
+                fast_trained = FAX_NONE;
+            /*endif*/
+            fprintf(stderr, "Max V.17 9600 max zeros = %d\n", v17_9600_max_zeros);
+            v17_9600_max_zeros = 0;
+            v17_9600_zeros = 0;
+            break;
+        }
+        /*endswitch*/
+        return;
+    }
+    /*endif*/
+    if (bit == 0)
+    {
+        v17_9600_zeros++;
+    }
+    else
+    {
+        if (v17_9600_zeros > v17_9600_max_zeros)
+            v17_9600_max_zeros = v17_9600_zeros;
+        /*endif*/
+        v17_9600_zeros = 0;
+    }
+    /*endif*/
+    if (error_correcting_mode)
+    {
+        hdlc_rx_put_bit(&hdlcrx, bit);
+    }
+    else
+    {
+        if (t4_rx_put_bit(&t4_rx_state, bit))
+        {
+            t4_end();
+            if (!end_of_page_detected)
+                fprintf(stderr, "End of page detected\n");
+            /*endif*/
+            end_of_page_detected = true;
+        }
+        /*endif*/
+    }
+    /*endif*/
+    //printf("V.17 Rx bit %d - %d\n", rx_bits++, bit);
+}
+/*- End of function --------------------------------------------------------*/
+
+static void v17_7200_put_bit(void *user_data, int bit)
+{
+    if (bit < 0)
+    {
+        /* Special conditions */
+        fprintf(stderr, "V.17 rx status is %s (%d)\n", signal_status_to_str(bit), bit);
+        switch (bit)
+        {
+        case SIG_STATUS_TRAINING_SUCCEEDED:
+            fast_trained = FAX_V17_RX;
+            v17_7200_max_zeros = 0;
+            v17_7200_zeros = 0;
+            t4_begin();
+            break;
+        case SIG_STATUS_CARRIER_DOWN:
+            t4_end();
+            if (fast_trained == FAX_V17_RX)
+                fast_trained = FAX_NONE;
+            /*endif*/
+            fprintf(stderr, "Max V.17 7200 max zeros = %d\n", v17_7200_max_zeros);
+            v17_7200_max_zeros = 0;
+            v17_7200_zeros = 0;
+            break;
+        }
+        /*endswitch*/
+        return;
+    }
+    /*endif*/
+    if (bit == 0)
+    {
+        v17_7200_zeros++;
+    }
+    else
+    {
+        if (v17_7200_zeros > v17_7200_max_zeros)
+            v17_7200_max_zeros = v17_7200_zeros;
+        /*endif*/
+        v17_7200_zeros = 0;
+    }
+    /*endif*/
+    if (error_correcting_mode)
+    {
+        hdlc_rx_put_bit(&hdlcrx, bit);
+    }
+    else
+    {
+        if (t4_rx_put_bit(&t4_rx_state, bit))
+        {
+            t4_end();
+            if (!end_of_page_detected)
+                fprintf(stderr, "End of page detected\n");
+            /*endif*/
+            end_of_page_detected = true;
+        }
+        /*endif*/
+    }
+    /*endif*/
+    //printf("V.17 Rx bit %d - %d\n", rx_bits++, bit);
+}
+/*- End of function --------------------------------------------------------*/
+
+static void v29_9600_put_bit(void *user_data, int bit)
 {
     if (bit < 0)
     {
@@ -473,16 +706,34 @@ static void v29_put_bit(void *user_data, int bit)
         {
         case SIG_STATUS_TRAINING_SUCCEEDED:
             fast_trained = FAX_V29_RX;
+            v29_9600_max_zeros = 0;
+            v29_9600_zeros = 0;
             t4_begin();
             break;
         case SIG_STATUS_CARRIER_DOWN:
             t4_end();
             if (fast_trained == FAX_V29_RX)
                 fast_trained = FAX_NONE;
+            /*endif*/
+            fprintf(stderr, "Max V.29 9600 max zeros = %d\n", v17_9600_max_zeros);
+            v29_9600_max_zeros = 0;
+            v29_9600_zeros = 0;
             break;
         }
         /*endswitch*/
         return;
+    }
+    /*endif*/
+    if (bit == 0)
+    {
+        v29_9600_zeros++;
+    }
+    else
+    {
+        if (v29_9600_zeros > v29_9600_max_zeros)
+            v29_9600_max_zeros = v29_9600_zeros;
+        /*endif*/
+        v29_9600_zeros = 0;
     }
     /*endif*/
     if (error_correcting_mode)
@@ -496,6 +747,7 @@ static void v29_put_bit(void *user_data, int bit)
             t4_end();
             if (!end_of_page_detected)
                 fprintf(stderr, "End of page detected\n");
+            /*endif*/
             end_of_page_detected = true;
         }
         /*endif*/
@@ -505,26 +757,44 @@ static void v29_put_bit(void *user_data, int bit)
 }
 /*- End of function --------------------------------------------------------*/
 
-static void v27ter_put_bit(void *user_data, int bit)
+static void v29_7200_put_bit(void *user_data, int bit)
 {
     if (bit < 0)
     {
         /* Special conditions */
-        fprintf(stderr, "V.27ter rx status is %s (%d)\n", signal_status_to_str(bit), bit);
+        fprintf(stderr, "V.29 rx status is %s (%d)\n", signal_status_to_str(bit), bit);
         switch (bit)
         {
         case SIG_STATUS_TRAINING_SUCCEEDED:
-            fast_trained = FAX_V27TER_RX;
+            fast_trained = FAX_V29_RX;
+            v29_7200_max_zeros = 0;
+            v29_7200_zeros = 0;
             t4_begin();
             break;
         case SIG_STATUS_CARRIER_DOWN:
             t4_end();
-            if (fast_trained == FAX_V27TER_RX)
+            if (fast_trained == FAX_V29_RX)
                 fast_trained = FAX_NONE;
+            /*endif*/
+            fprintf(stderr, "Max V.29 7200 max zeros = %d\n", v29_7200_max_zeros);
+            v29_7200_max_zeros = 0;
+            v29_7200_zeros = 0;
             break;
         }
         /*endswitch*/
         return;
+    }
+    /*endif*/
+    if (bit == 0)
+    {
+        v29_7200_zeros++;
+    }
+    else
+    {
+        if (v29_7200_zeros > v29_7200_max_zeros)
+            v29_7200_max_zeros = v29_7200_zeros;
+        /*endif*/
+        v29_7200_zeros = 0;
     }
     /*endif*/
     if (error_correcting_mode)
@@ -538,6 +808,68 @@ static void v27ter_put_bit(void *user_data, int bit)
             t4_end();
             if (!end_of_page_detected)
                 fprintf(stderr, "End of page detected\n");
+            /*endif*/
+            end_of_page_detected = true;
+        }
+        /*endif*/
+    }
+    /*endif*/
+    //printf("V.29 Rx bit %d - %d\n", rx_bits++, bit);
+}
+/*- End of function --------------------------------------------------------*/
+
+static void v27ter_4800_put_bit(void *user_data, int bit)
+{
+    if (bit < 0)
+    {
+        /* Special conditions */
+        fprintf(stderr, "V.27ter rx status is %s (%d)\n", signal_status_to_str(bit), bit);
+        switch (bit)
+        {
+        case SIG_STATUS_TRAINING_SUCCEEDED:
+            fast_trained = FAX_V27TER_RX;
+            v27ter_4800_max_zeros = 0;
+            v27ter_4800_zeros = 0;
+            t4_begin();
+            break;
+        case SIG_STATUS_CARRIER_DOWN:
+            t4_end();
+            if (fast_trained == FAX_V27TER_RX)
+                fast_trained = FAX_NONE;
+            /*endif*/
+            fprintf(stderr, "Max V.27ter 4800 max zeros = %d\n", v27ter_4800_max_zeros);
+            v27ter_4800_max_zeros = 0;
+            v27ter_4800_zeros = 0;
+            break;
+        }
+        /*endswitch*/
+        return;
+    }
+    /*endif*/
+    if (bit == 0)
+    {
+        v27ter_4800_zeros++;
+    }
+    else
+    {
+        if (v27ter_4800_zeros > v27ter_4800_max_zeros)
+            v27ter_4800_max_zeros = v27ter_4800_zeros;
+        /*endif*/
+        v27ter_4800_zeros = 0;
+    }
+    /*endif*/
+    if (error_correcting_mode)
+    {
+        hdlc_rx_put_bit(&hdlcrx, bit);
+    }
+    else
+    {
+        if (t4_rx_put_bit(&t4_rx_state, bit))
+        {
+            t4_end();
+            if (!end_of_page_detected)
+                fprintf(stderr, "End of page detected\n");
+            /*endif*/
             end_of_page_detected = true;
         }
         /*endif*/
@@ -547,13 +879,96 @@ static void v27ter_put_bit(void *user_data, int bit)
 }
 /*- End of function --------------------------------------------------------*/
 
+static void v27ter_2400_put_bit(void *user_data, int bit)
+{
+    if (bit < 0)
+    {
+        /* Special conditions */
+        fprintf(stderr, "V.27ter rx status is %s (%d)\n", signal_status_to_str(bit), bit);
+        switch (bit)
+        {
+        case SIG_STATUS_TRAINING_SUCCEEDED:
+            fast_trained = FAX_V27TER_RX;
+            v27ter_2400_max_zeros = 0;
+            v27ter_2400_zeros = 0;
+            t4_begin();
+            break;
+        case SIG_STATUS_CARRIER_DOWN:
+            t4_end();
+            if (fast_trained == FAX_V27TER_RX)
+                fast_trained = FAX_NONE;
+            /*endif*/
+            fprintf(stderr, "Max V.27ter 2400 max zeros = %d\n", v27ter_2400_max_zeros);
+            v27ter_2400_max_zeros = 0;
+            v27ter_2400_zeros = 0;
+            break;
+        }
+        /*endswitch*/
+        return;
+    }
+    /*endif*/
+    if (bit == 0)
+    {
+        v27ter_2400_zeros++;
+    }
+    else
+    {
+        if (v27ter_2400_zeros > v27ter_2400_max_zeros)
+            v27ter_2400_max_zeros = v27ter_2400_zeros;
+        /*endif*/
+        v27ter_2400_zeros = 0;
+    }
+    /*endif*/
+    if (error_correcting_mode)
+    {
+        hdlc_rx_put_bit(&hdlcrx, bit);
+    }
+    else
+    {
+        if (t4_rx_put_bit(&t4_rx_state, bit))
+        {
+            t4_end();
+            if (!end_of_page_detected)
+                fprintf(stderr, "End of page detected\n");
+            /*endif*/
+            end_of_page_detected = true;
+        }
+        /*endif*/
+    }
+    /*endif*/
+    //printf("V.27ter Rx bit %d - %d\n", rx_bits++, bit);
+}
+/*- End of function --------------------------------------------------------*/
+
+static void decode_t30_message(bool t30_decode_reversed)
+{
+    int i;
+    unsigned int hex;
+    char buf[1024];
+    uint8_t bytes[1024];
+
+    /* Decode T.30 messages entered as a string of hex byte values in the form xx xx xx */
+    while (fgets(buf, 1024, stdin))
+    {
+        for (i = 0;  i < 256;  i++)
+        {
+            if (sscanf(&buf[3*i], "%x", &hex) != 1)
+                break;
+            /*endif*/
+            if (t30_decode_reversed)
+                hex = bit_reverse8(hex);
+            /*endif*/
+            bytes[i] = hex;
+        }
+        /*endfor*/
+        print_frame("", bytes, i);
+    }
+    /*endwhile*/
+}
+/*- End of function --------------------------------------------------------*/
+
 int main(int argc, char *argv[])
 {
-    fsk_rx_state_t *fsk;
-    v17_rx_state_t *v17;
-    v29_rx_state_t *v29;
-    v27ter_rx_state_t *v27ter_4800;
-    v27ter_rx_state_t *v27ter_2400;
     int16_t amp[SAMPLES_PER_CHUNK];
     SNDFILE *inhandle;
     SF_INFO info;
@@ -563,10 +978,6 @@ int main(int argc, char *argv[])
     int opt;
     bool t30_decode_reversed;
     bool t30_decode;
-    int i;
-    unsigned int hex;
-    char buf[1024];
-    uint8_t bytes[1024];
 
     filename = "fax_samp.wav";
     t30_decode_reversed = false;
@@ -687,35 +1098,17 @@ int main(int argc, char *argv[])
         filename = argv[0];
     /*endif*/
 
-    memset(&t30_dummy, 0, sizeof(t30_dummy));
-    logging = t30_get_logging_state(&t30_dummy);
-    span_log_init(logging, SPAN_LOG_NONE, NULL);
-    span_log_set_protocol(logging, "T.30");
-    span_log_set_level(logging, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_SHOW_TAG | SPAN_LOG_SHOW_SAMPLE_TIME | SPAN_LOG_FLOW);
+    t30_log = span_log_init(NULL, SPAN_LOG_NONE, NULL);
+    span_log_set_protocol(t30_log, "T.30");
+    span_log_set_level(t30_log, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_SHOW_TAG | SPAN_LOG_SHOW_SAMPLE_TIME | SPAN_LOG_FLOW);
 
     if (t30_decode)
     {
-        /* Decode T.30 messages entered as a string of hex byte values in the form xx xx xx */
-        while (fgets(buf, 1024, stdin))
-        {
-            for (i = 0;  i < 256;  i++)
-            {
-                if (sscanf(&buf[3*i], "%x", &hex) != 1)
-                    break;
-                /*endif*/
-                if (t30_decode_reversed)
-                    hex = bit_reverse8(hex);
-                /*endif*/
-                bytes[i] = hex;
-            }
-            /*endfor*/
-            print_frame("", bytes, i);
-        }
-        /*endwhile*/
+        decode_t30_message(t30_decode_reversed);
         exit(0);
     }
     /*endif*/
-    
+
     memset(&info, 0, sizeof(info));
     if ((inhandle = sf_open(filename, SFM_READ, &info)) == NULL)
     {
@@ -738,25 +1131,48 @@ int main(int argc, char *argv[])
 
     hdlc_rx_init(&hdlcrx, false, true, 5, hdlc_accept, NULL);
     fsk = fsk_rx_init(NULL, &preset_fsk_specs[FSK_V21CH2], FSK_FRAME_MODE_SYNC, v21_put_bit, NULL);
-    v17 = v17_rx_init(NULL, 14400, v17_put_bit, NULL);
-    v29 = v29_rx_init(NULL, 9600, v29_put_bit, NULL);
-    //v29 = v29_rx_init(NULL, 7200, v29_put_bit, NULL);
-    v27ter_4800 = v27ter_rx_init(NULL, 4800, v27ter_put_bit, NULL);
-    v27ter_2400 = v27ter_rx_init(NULL, 2400, v27ter_put_bit, NULL);
+    v17_14400 = v17_rx_init(NULL, 14400, v17_14400_put_bit, NULL);
+    v17_12000 = v17_rx_init(NULL, 12000, v17_12000_put_bit, NULL);
+    v17_9600 = v17_rx_init(NULL, 9600, v17_9600_put_bit, NULL);
+    v17_7200 = v17_rx_init(NULL, 7200, v17_7200_put_bit, NULL);
+    v29_9600 = v29_rx_init(NULL, 9600, v29_9600_put_bit, NULL);
+    v29_7200 = v29_rx_init(NULL, 7200, v29_7200_put_bit, NULL);
+    v27ter_4800 = v27ter_rx_init(NULL, 4800, v27ter_4800_put_bit, NULL);
+    v27ter_2400 = v27ter_rx_init(NULL, 2400, v27ter_2400_put_bit, NULL);
 
-    fsk_rx_signal_cutoff(fsk, -45.5);
-    v17_rx_signal_cutoff(v17, -45.5);
-    v29_rx_signal_cutoff(v29, -45.5);
-    v27ter_rx_signal_cutoff(v27ter_4800, -40.0);
-    v27ter_rx_signal_cutoff(v27ter_2400, -40.0);
+    fsk_rx_set_signal_cutoff(fsk, -45.5);
+    v17_rx_set_signal_cutoff(v17_14400, -45.5);
+    v17_rx_set_signal_cutoff(v17_12000, -45.5);
+    v17_rx_set_signal_cutoff(v17_9600, -45.5);
+    v17_rx_set_signal_cutoff(v17_7200, -45.5);
+    v29_rx_set_signal_cutoff(v29_9600, -45.5);
+    v29_rx_set_signal_cutoff(v29_7200, -45.5);
+    v27ter_rx_set_signal_cutoff(v27ter_4800, -40.0);
+    v27ter_rx_set_signal_cutoff(v27ter_2400, -40.0);
 
 #if 1
-    logging = v17_rx_get_logging_state(v17);
-    span_log_set_protocol(logging, "V.17");
+    logging = v17_rx_get_logging_state(v17_14400);
+    span_log_set_protocol(logging, "V.17-14400");
     span_log_set_level(logging, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_SHOW_TAG | SPAN_LOG_SHOW_SAMPLE_TIME | SPAN_LOG_FLOW);
 
-    logging = v29_rx_get_logging_state(v29);
-    span_log_set_protocol(logging, "V.29");
+    logging = v17_rx_get_logging_state(v17_12000);
+    span_log_set_protocol(logging, "V.17-12000");
+    span_log_set_level(logging, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_SHOW_TAG | SPAN_LOG_SHOW_SAMPLE_TIME | SPAN_LOG_FLOW);
+
+    logging = v17_rx_get_logging_state(v17_9600);
+    span_log_set_protocol(logging, "V.17-9600");
+    span_log_set_level(logging, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_SHOW_TAG | SPAN_LOG_SHOW_SAMPLE_TIME | SPAN_LOG_FLOW);
+
+    logging = v17_rx_get_logging_state(v17_7200);
+    span_log_set_protocol(logging, "V.17-7200");
+    span_log_set_level(logging, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_SHOW_TAG | SPAN_LOG_SHOW_SAMPLE_TIME | SPAN_LOG_FLOW);
+
+    logging = v29_rx_get_logging_state(v29_9600);
+    span_log_set_protocol(logging, "V.29-9600");
+    span_log_set_level(logging, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_SHOW_TAG | SPAN_LOG_SHOW_SAMPLE_TIME | SPAN_LOG_FLOW);
+
+    logging = v29_rx_get_logging_state(v29_7200);
+    span_log_set_protocol(logging, "V.29-7200");
     span_log_set_level(logging, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_SHOW_TAG | SPAN_LOG_SHOW_SAMPLE_TIME | SPAN_LOG_FLOW);
 
     logging = v27ter_rx_get_logging_state(v27ter_4800);
@@ -782,16 +1198,27 @@ int main(int argc, char *argv[])
             break;
         /*endif*/
         fsk_rx(fsk, amp, len);
-        v17_rx(v17, amp, len);
-        v29_rx(v29, amp, len);
+        v17_rx(v17_14400, amp, len);
+        v17_rx(v17_12000, amp, len);
+        v17_rx(v17_9600, amp, len);
+        v17_rx(v17_7200, amp, len);
+        v29_rx(v29_9600, amp, len);
+        v29_rx(v29_7200, amp, len);
         v27ter_rx(v27ter_4800, amp, len);
         v27ter_rx(v27ter_2400, amp, len);
 
-        logging = t30_get_logging_state(&t30_dummy);
+        span_log_bump_samples(t30_log, len);
+        logging = v17_rx_get_logging_state(v17_14400);
         span_log_bump_samples(logging, len);
-        logging = v17_rx_get_logging_state(v17);
+        logging = v17_rx_get_logging_state(v17_12000);
         span_log_bump_samples(logging, len);
-        logging = v29_rx_get_logging_state(v29);
+        logging = v17_rx_get_logging_state(v17_9600);
+        span_log_bump_samples(logging, len);
+        logging = v17_rx_get_logging_state(v17_7200);
+        span_log_bump_samples(logging, len);
+        logging = v29_rx_get_logging_state(v29_9600);
+        span_log_bump_samples(logging, len);
+        logging = v29_rx_get_logging_state(v29_7200);
         span_log_bump_samples(logging, len);
         logging = v27ter_rx_get_logging_state(v27ter_4800);
         span_log_bump_samples(logging, len);

@@ -327,13 +327,13 @@ SPAN_DECLARE(float) dds_frequency(int32_t phase_rate)
 
 SPAN_DECLARE(int16_t) dds_scaling_dbm0(float level)
 {
-    return (int16_t) (powf(10.0f, (level - DBM0_MAX_SINE_POWER)/20.0f)*32767.0f);
+    return (int16_t) (db_to_amplitude_ratio(level - DBM0_MAX_SINE_POWER)*32767.0f);
 }
 /*- End of function --------------------------------------------------------*/
 
 SPAN_DECLARE(int16_t) dds_scaling_dbov(float level)
 {
-    return (int16_t) (powf(10.0f, (level - DBOV_MAX_SINE_POWER)/20.0f)*32767.0f);
+    return (int16_t) (db_to_amplitude_ratio(level - DBOV_MAX_SINE_POWER)*32767.0f);
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -346,9 +346,11 @@ SPAN_DECLARE(int16_t) dds_lookup(uint32_t phase)
     step = phase & (DDS_STEPS - 1);
     if ((phase & DDS_STEPS))
         step = DDS_STEPS - step;
+    /*endif*/
     amp = sine_table[step];
     if ((phase & (2*DDS_STEPS)))
         amp = -amp;
+    /*endif*/
     return amp;
 }
 /*- End of function --------------------------------------------------------*/

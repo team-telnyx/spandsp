@@ -46,6 +46,8 @@ all the tests in G.168 are fully implemented at this time.
 #define ENABLE_GUI
 #endif
 
+#define _DEFAULT_SOURCE
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -169,8 +171,10 @@ static void dump_ec_state(echo_can_state_t *ctx)
 
     if ((f = fopen("echo_tests_state.txt", "wt")) == NULL)
         return;
+    /*endif*/
     for (i = 0;  i < TEST_EC_TAPS;  i++)
         fprintf(f, "%f\n", (float) ctx->fir_taps16[0][i]/(1 << 15));
+    /*endifor*/
     fclose(f);
 }
 /*- End of function --------------------------------------------------------*/
@@ -188,8 +192,10 @@ static inline void put_residue(int16_t amp)
             fprintf(stderr, "    Error writing residue sound\n");
             exit(2);
         }
+        /*endif*/
         residue_cur = 0;
     }
+    /*endif*/
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -203,6 +209,7 @@ static void signal_load(signal_source_t *sig, const char *name)
         fprintf(stderr, "    Error reading sound file '%s'\n", sig->name);
         exit(2);
     }
+    /*endif*/
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -213,6 +220,7 @@ static void signal_free(signal_source_t *sig)
         fprintf(stderr, "    Cannot close sound file '%s'\n", sig->name);
         exit(2);
     }
+    /*endif*/
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -230,6 +238,7 @@ static int16_t signal_amp(signal_source_t *sig)
     tx = sig->signal[sig->cur++]*sig->gain;
     if (sig->cur >= sig->max)
         sig->cur = 0;
+    /*endif*/
     return tx;
 }
 /*- End of function --------------------------------------------------------*/
@@ -240,16 +249,21 @@ static level_measurement_device_t *level_measurement_device_create(int type)
     int i;
 
     dev = (level_measurement_device_t *) malloc(sizeof(level_measurement_device_t));
-    dev->fir = (fir_float_state_t *) malloc(sizeof(fir_float_state_t));
-    fir_float_create(dev->fir,
-                     level_measurement_bp_coeffs,
-                     sizeof(level_measurement_bp_coeffs)/sizeof(float));
-    for (i = 0;  i < 35*8;  i++)
-        dev->history[i] = 0.0f;
-    dev->pos = 0;
-    dev->factor = expf(-1.0f/((float) SAMPLE_RATE*0.035f));
-    dev->power = 0;
-    dev->type = type;
+    if (dev)
+    {
+        dev->fir = (fir_float_state_t *) malloc(sizeof(fir_float_state_t));
+        fir_float_create(dev->fir,
+                         level_measurement_bp_coeffs,
+                         sizeof(level_measurement_bp_coeffs)/sizeof(float));
+        for (i = 0;  i < 35*8;  i++)
+            dev->history[i] = 0.0f;
+        /*endfor*/
+        dev->pos = 0;
+        dev->factor = expf(-1.0f/((float) SAMPLE_RATE*0.035f));
+        dev->power = 0;
+        dev->type = type;
+    }
+    /*endif*/
     return dev;
 }
 /*- End of function --------------------------------------------------------*/
@@ -261,6 +275,7 @@ static void level_measurement_device_reset(level_measurement_device_t *dev)
 
     for (i = 0;  i < 35*8;  i++)
         dev->history[i] = 0.0f;
+    /*endfor*/
     dev->pos = 0;
     dev->power = 0;
     dev->peak = 0.0f;
@@ -318,11 +333,14 @@ static float level_measurement_device(level_measurement_device_t *dev, int16_t a
         dev->history[dev->pos++] = signal;
         signal = sqrtf(dev->power/(35.8f*8.0f));
     }
+    /*endif*/
     if (signal <= 0.0f)
         return -99.0f;
+    /*endif*/
     power = DBM0_MAX_POWER + 20.0f*log10f(signal/32767.0f + 1.0e-10f);
     if (power > dev->peak)
         dev->peak = power;
+    /*endif*/
     return power;
 }
 /*- End of function --------------------------------------------------------*/
@@ -361,6 +379,7 @@ static void print_results(void)
 {
     if (!quiet)
         printf("test  model  ERL   time     Max Rin  Max Rout Max Sgen Max Sin  Max Sout\n");
+    /*endif*/
     printf("%-4s  %-1d      %-5.1f%6.2fs%9.2f%9.2f%9.2f%9.2f%9.2f\n",
            test_name,
            chan_model.model_no,
@@ -419,6 +438,7 @@ static int channel_model_create(channel_model_state_t *chan, int model, float er
 
     if (model < 0  ||  model >= (int) (sizeof(line_model_sizes)/sizeof(line_model_sizes[0])))
         return -1;
+    /*endif*/
     fir32_create(&chan->impulse, line_models[model], line_model_sizes[model]);
     chan->gain = 32768.0f*powf(10.0f, erl/20.0f)*ki[model];
     chan->munging_codec = codec;
@@ -447,6 +467,7 @@ static int16_t channel_model(channel_model_state_t *chan, int16_t rout, int16_t 
         sgen = ulaw_to_linear(linear_to_ulaw(sgen));
         break;
     }
+    /*endswitch*/
 
     /* The local tx signal will usually have gone through codec munging before
        it reached the line's analogue area, where the echo occurs. */
@@ -459,6 +480,7 @@ static int16_t channel_model(channel_model_state_t *chan, int16_t rout, int16_t 
         rout = ulaw_to_linear(linear_to_ulaw(rout));
         break;
     }
+    /*endswitch*/
     /* Now we need to model the echo. We only model a single analogue segment, as per
        the G.168 spec. However, there will generally be near end and far end analogue/echoey
        segments in the real world, unless an end is purely digital. */
@@ -476,6 +498,7 @@ static int16_t channel_model(channel_model_state_t *chan, int16_t rout, int16_t 
         sin = ulaw_to_linear(linear_to_ulaw(sin));
         break;
     }
+    /*endswitch*/
     return sin;
 }
 /*- End of function --------------------------------------------------------*/
@@ -594,12 +617,16 @@ static void run_test(echo_can_state_t *ctx, int16_t (*tx_source)(void), int16_t 
                 fprintf(stderr, "    Error writing result sound\n");
                 exit(2);
             }
+            /*endif*/
             result_cur = 0;
         }
+        /*endif*/
     }
+    /*endfor*/
 #if defined(ENABLE_GUI)
     if (use_gui)
         echo_can_monitor_can_update(ctx->fir_taps16[0], TEST_EC_TAPS);
+    /*endif*/
 #endif
     if (result_cur >= 0)
     {
@@ -609,8 +636,10 @@ static void run_test(echo_can_state_t *ctx, int16_t (*tx_source)(void), int16_t 
             fprintf(stderr, "    Error writing result sound\n");
             exit(2);
         }
+        /*endif*/
         result_cur = 0;
     }
+    /*endif*/
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -669,16 +698,20 @@ static int perform_test_sanity(void)
                     fprintf(stderr, "    Error reading far sound\n");
                     exit(2);
                 }
+                /*endif*/
                 if (far_max == 0)
                     break;
+                /*endif*/
                 far_cur = 0;
             }
+            /*endif*/
             far_tx = far_sound[far_cur++];
         }
         else
         {
             far_tx = 0;
         }
+        /*endif*/
 #else
         //far_sound[0] = 0;
         far_tx = 0;
@@ -695,9 +728,12 @@ static int perform_test_sanity(void)
             {
                 for (j = 0;  j < ctx->taps;  j++)
                     coeffs[coeff_index][j] = ctx->fir_taps32[j];
+                /*endfor*/
                 coeff_index++;
             }
+            /*endif*/
         }
+        /*endif*/
 #endif
         result_sound[result_cur++] = tx;
         result_sound[result_cur++] = rx;
@@ -725,9 +761,12 @@ static int perform_test_sanity(void)
                 fprintf(stderr, "    Error writing result sound\n");
                 exit(2);
             }
+            /*endif*/
             result_cur = 0;
         }
+        /*endif*/
     }
+    /*endfor*/
     if (result_cur > 0)
     {
         outframes = sf_writef_short(result_handle, result_sound, result_cur/RESULT_CHANNELS);
@@ -736,14 +775,18 @@ static int perform_test_sanity(void)
             fprintf(stderr, "    Error writing result sound\n");
             exit(2);
         }
+        /*endif*/
     }
+    /*endif*/
 #if defined(XYZZY)
     for (j = 0;  j < ctx->taps;  j++)
     {
         for (i = 0;  i < coeff_index;  i++)
             fprintf(stderr, "%d ", coeffs[i][j]);
+        /*endfor*/
         fprintf(stderr, "\n");
     }
+    /*endfor*/
 #endif
 
     echo_can_free(ctx);
@@ -776,6 +819,7 @@ static int perform_test_2a(void)
         printf("Test failed\n");
     else
         printf("Test passed\n");
+    /*endif*/
 
     /* Test 2A (b) - Reconvergence test with NLP enabled */
 
@@ -785,6 +829,7 @@ static int perform_test_2a(void)
         fprintf(stderr, "    Failed to create line model\n");
         exit(2);
     }
+    /*endif*/
     signal_restart(&local_css, 0.0f);
     run_test(ctx, local_css_signal, silence, 1000);
     level_measurements_reset_peaks();
@@ -794,6 +839,7 @@ static int perform_test_2a(void)
         printf("Test failed\n");
     else
         printf("Test passed\n");
+    /*endif*/
 
     echo_can_free(ctx);
     return 0;
@@ -837,6 +883,7 @@ static int perform_test_2b(void)
         fprintf(stderr, "    Failed to create line model\n");
         exit(2);
     }
+    /*endif*/
     run_test(ctx, local_css_signal, silence, 1000);
     level_measurements_reset_peaks();
     run_test(ctx, local_css_signal, silence, 9000);
@@ -848,6 +895,7 @@ static int perform_test_2b(void)
         printf("Test failed\n");
     else
         printf("Test passed\n");
+    /*endif*/
 
     echo_can_free(ctx);
     return 0;
@@ -883,6 +931,7 @@ static int perform_test_2ca(void)
         printf("Test failed\n");
     else
         printf("Test passed\n");
+    /*endif*/
 
     echo_can_adaption_mode(ctx, ECHO_CAN_USE_ADAPTION);
     echo_can_free(ctx);
@@ -921,6 +970,7 @@ static int perform_test_3a(void)
         printf("Test failed\n");
     else
         printf("Test passed\n");
+    /*endif*/
 
     echo_can_adaption_mode(ctx, ECHO_CAN_USE_ADAPTION);
     echo_can_free(ctx);
@@ -1154,6 +1204,7 @@ static int perform_test_6(void)
                 clean = echo_can_update(ctx, tx, rx);
                 put_residue(clean);
             }
+            /*endfor*/
 #if defined(ENABLE_GUI)
             if (use_gui)
             {
@@ -1161,12 +1212,16 @@ static int perform_test_6(void)
                 echo_can_monitor_update_display();
                 usleep(100000);
             }
+            /*endif*/
 #endif
         }
+        /*endfor*/
     }
+    /*endfor*/
 #if defined(ENABLE_GUI)
     if (use_gui)
         echo_can_monitor_can_update(ctx->fir_taps16[0], TEST_EC_TAPS);
+    /*endif*/
 #endif
     echo_can_free(ctx);
     return 0;
@@ -1215,6 +1270,7 @@ static int perform_test_7(void)
             clean = echo_can_update(ctx, tx, rx);
             put_residue(clean);
         }
+        /*endfor*/
 #if defined(ENABLE_GUI)
         if (use_gui)
         {
@@ -1222,11 +1278,14 @@ static int perform_test_7(void)
             echo_can_monitor_update_display();
             usleep(100000);
         }
+        /*endif*/
 #endif
     }
+    /*endfor*/
 #if defined(ENABLE_GUI)
     if (use_gui)
         echo_can_monitor_can_update(ctx->fir_taps16[0], TEST_EC_TAPS);
+    /*endif*/
 #endif
     echo_can_free(ctx);
     return 0;
@@ -1455,14 +1514,18 @@ static int match_test_name(const char *name)
             tests[i].func();
             return 0;
         }
+        /*endif*/
     }
+    /*endfor*/
     printf("Unknown test name '%s' specified. The known test names are ", name);
     for (i = 0;  tests[i].name;  i++)
     {
         printf("%s", tests[i].name);
         if (tests[i + 1].name)
             printf(", ");
+        /*endif*/
     }
+    /*endfor*/
     printf("\n");
     return -1;
 }
@@ -1500,6 +1563,7 @@ static void simulate_ec(char *argv[], int two_channel_file, int mode)
         rxtxfile = sf_open_telephony_read(argv[0], 2);
         ecfile = sf_open_telephony_write(argv[1], 1);
     }
+    /*endif*/
 
     ctx = echo_can_init(TEST_EC_TAPS, 0);
     echo_can_adaption_mode(ctx, mode);
@@ -1512,6 +1576,7 @@ static void simulate_ec(char *argv[], int two_channel_file, int mode)
                 fprintf(stderr, "    Error reading tx sound file\n");
                 exit(2);
             }
+            /*endif*/
             rin = buf[0];
             sin = buf[1];
             nrx = ntx;
@@ -1528,7 +1593,9 @@ static void simulate_ec(char *argv[], int two_channel_file, int mode)
                 fprintf(stderr, "    Error reading rx sound file\n");
                 exit(2);
             }
+            /*endif*/
         }
+        /*endif*/
         rout = echo_can_hpf_tx(ctx, rin);
         sout = echo_can_update(ctx, rout, sin);
 
@@ -1537,6 +1604,7 @@ static void simulate_ec(char *argv[], int two_channel_file, int mode)
             fprintf(stderr, "    Error writing ec sound file\n");
             exit(2);
         }
+        /*endif*/
         level_measurements_update(rin, sin, rout, sout, 0);
         write_log_files(rin, sin);
 #if defined(ENABLE_GUI)
@@ -1558,6 +1626,7 @@ static void simulate_ec(char *argv[], int two_channel_file, int mode)
         sf_close_telephony(txfile);
         sf_close_telephony(rxfile);
     }
+    /*endif*/
     sf_close_telephony(ecfile);
 }
 /*- End of function --------------------------------------------------------*/
@@ -1631,13 +1700,16 @@ int main(int argc, char *argv[])
             exit(2);
             break;
         }
+        /*endswitch*/
     }
+    /*endwhile*/
     argc -= optind;
     argv += optind;
 
 #if defined(ENABLE_GUI)
     if (use_gui)
         start_echo_can_monitor(TEST_EC_TAPS);
+    /*endif*/
 #endif
     if (simulate)
     {
@@ -1648,6 +1720,7 @@ int main(int argc, char *argv[])
             printf("not enough arguments for a simulation\n");
             exit(2);
         }
+        /*endif*/
         mode = ECHO_CAN_USE_NLP;
         mode |= ((cng)  ?  ECHO_CAN_USE_CNG  :  ECHO_CAN_USE_CLIP);
         if (hpf)
@@ -1655,6 +1728,7 @@ int main(int argc, char *argv[])
             mode |= ECHO_CAN_USE_TX_HPF;
             mode |= ECHO_CAN_USE_RX_HPF;
         }
+        /*endif*/
         simulate_ec(argv, two_channel_file, mode);
     }
     else
@@ -1663,6 +1737,7 @@ int main(int argc, char *argv[])
 #if defined(ENABLE_GUI)
         if (use_gui)
             echo_can_monitor_line_model_update(chan_model.impulse.coeffs, chan_model.impulse.taps);
+        /*endif*/
 #endif
         signal_load(&local_css, "sound_c1_8k.wav");
         signal_load(&far_css, "sound_c3_8k.wav");
@@ -1684,6 +1759,7 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "    Failed to open result file\n");
                 exit(2);
             }
+            /*endif*/
             result_cur = 0;
             level_measurements_create(0);
             for (i = 0;  i < argc;  i++)
@@ -1693,15 +1769,19 @@ int main(int argc, char *argv[])
                     fprintf(stderr, "    Failed to create line model\n");
                     exit(2);
                 }
+                /*endif*/
                 match_test_name(argv[i]);
             }
+            /*endfor*/
             if (sf_close_telephony(result_handle))
             {
                 fprintf(stderr, "    Cannot close speech file '%s'\n", "result_sound.wav");
                 exit(2);
             }
+            /*endif*/
             printf("Run time %lds\n", time(NULL) - now);
         }
+        /*endif*/
         signal_free(&local_css);
         signal_free(&far_css);
         if (sf_close_telephony(residue_handle))
@@ -1709,10 +1789,13 @@ int main(int argc, char *argv[])
             fprintf(stderr, "    Cannot close speech file '%s'\n", RESIDUE_FILE_NAME);
             exit(2);
         }
+        /*endif*/
     }
+    /*endif*/
 #if defined(ENABLE_GUI)
     if (use_gui)
         echo_can_monitor_wait_to_end();
+    /*endif*/
 #endif
 
     printf("Tests passed.\n");

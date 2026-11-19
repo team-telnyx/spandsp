@@ -55,13 +55,89 @@
 
 #include "spandsp/private/power_meter.h"
 
+SPAN_DECLARE(power_meter_t *) power_meter_damping(power_meter_t *s, int shift)
+{
+    s->shift = shift;
+    return s;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(int32_t) power_meter_update(power_meter_t *s, int16_t amp)
+{
+    s->reading += ((amp*amp - s->reading) >> s->shift);
+    return s->reading;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(int32_t) power_meter_rx(power_meter_t *s, int16_t amp[], int len)
+{
+    int i;
+
+    for (i = 0;  i < len;  i++)
+        s->reading += ((amp[i]*amp[i] - s->reading) >> s->shift);
+    return 0;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(int32_t) power_meter_level_dbm0(float level)
+{
+    float l;
+
+    level -= DBM0_MAX_POWER;
+    if (level > 0.0)
+        level = 0.0;
+    /*endif*/
+    l = db_to_power_ratio(level)*(32767.0f*32767.0f);
+    return (int32_t) l;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(int32_t) power_meter_level_dbov(float level)
+{
+    float l;
+
+    level -= DBOV_MAX_POWER;
+    if (level > 0.0)
+        level = 0.0;
+    /*endif*/
+    l = db_to_power_ratio(level)*(32767.0f*32767.0f);
+    return (int32_t) l;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(int32_t) power_meter_current(power_meter_t *s)
+{
+    return s->reading;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(float) power_meter_current_dbm0(power_meter_t *s)
+{
+    if (s->reading <= 0)
+        return -96.329f + DBM0_MAX_POWER;
+    /*endif*/
+    /* This is based on A-law, but u-law is only 0.03dB different, so don't worry. */
+    return 10.0f*log10f((float) s->reading/(32767.0f*32767.0f) + 1.0e-10f) + DBM0_MAX_POWER;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(float) power_meter_current_dbov(power_meter_t *s)
+{
+    if (s->reading <= 0)
+        return -96.329f;
+    return 10.0f*log10f((float) s->reading/(32767.0f*32767.0f) + 1.0e-10f) + DBOV_MAX_POWER;
+}
+/*- End of function --------------------------------------------------------*/
+
 SPAN_DECLARE(power_meter_t *) power_meter_init(power_meter_t *s, int shift)
 {
     if (s == NULL)
     {
         if ((s = (power_meter_t *) span_alloc(sizeof(*s))) == NULL)
             return NULL;
+        /*endif*/
     }
+    /*endif*/
     s->shift = shift;
     s->reading = 0;
     return s;
@@ -78,67 +154,8 @@ SPAN_DECLARE(int) power_meter_free(power_meter_t *s)
 {
     if (s)
         span_free(s);
+    /*endif*/
     return 0;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(power_meter_t *) power_meter_damping(power_meter_t *s, int shift)
-{
-    s->shift = shift;
-    return s;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(int32_t) power_meter_update(power_meter_t *s, int16_t amp)
-{
-    s->reading += ((amp*amp - s->reading) >> s->shift);
-    return s->reading;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(int32_t) power_meter_level_dbm0(float level)
-{
-    float l;
-
-    level -= DBM0_MAX_POWER;
-    if (level > 0.0)
-        level = 0.0;
-    l = powf(10.0f, level/10.0f)*(32767.0f*32767.0f);
-    return (int32_t) l;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(int32_t) power_meter_level_dbov(float level)
-{
-    float l;
-
-    if (level > 0.0)
-        level = 0.0;
-    l = powf(10.0f, level/10.0f)*(32767.0f*32767.0f);
-    return (int32_t) l;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(int32_t) power_meter_current(power_meter_t *s)
-{
-    return s->reading;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(float) power_meter_current_dbm0(power_meter_t *s)
-{
-    if (s->reading <= 0)
-        return -96.329f + DBM0_MAX_POWER;
-    /* This is based on A-law, but u-law is only 0.03dB different, so don't worry. */
-    return 10.0f*log10f((float) s->reading/(32767.0f*32767.0f) + 1.0e-10f) + DBM0_MAX_POWER;
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(float) power_meter_current_dbov(power_meter_t *s)
-{
-    if (s->reading <= 0)
-        return -96.329f;
-    return 10.0f*log10f((float) s->reading/(32767.0f*32767.0f) + 1.0e-10f);
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -151,10 +168,12 @@ SPAN_DECLARE(int32_t) power_surge_detector(power_surge_detector_state_t *s, int1
     pow_medium = power_meter_update(&s->medium_term, amp);
     if (pow_medium < s->min)
         return 0;
+    /*endif*/
     if (!s->signal_present)
     {
         if (pow_short <= s->surge*(pow_medium >> 10))
             return 0;
+        /*endif*/
         s->signal_present = true;
         s->medium_term.reading = s->short_term.reading;
     }
@@ -166,7 +185,9 @@ SPAN_DECLARE(int32_t) power_surge_detector(power_surge_detector_state_t *s, int1
             s->medium_term.reading = s->short_term.reading;
             return 0;
         }
+        /*endif*/
     }
+    /*endif*/
     return pow_short;
 }
 /*- End of function --------------------------------------------------------*/
@@ -191,11 +212,13 @@ SPAN_DECLARE(power_surge_detector_state_t *) power_surge_detector_init(power_sur
     {
         if ((s = (power_surge_detector_state_t *) span_alloc(sizeof(*s))) == NULL)
             return NULL;
+        /*endif*/
     }
+    /*endif*/
     memset(s, 0, sizeof(*s));
     power_meter_init(&s->short_term, 4);
     power_meter_init(&s->medium_term, 7);
-    ratio = powf(10.0f, surge/10.0f);
+    ratio = db_to_power_ratio(surge);
     s->surge = 1024.0f*ratio;
     s->sag = 1024.0f/ratio;
     s->min = power_meter_level_dbm0(min);
@@ -214,6 +237,7 @@ SPAN_DECLARE(int) power_surge_detector_free(power_surge_detector_state_t *s)
 {
     if (s)
         span_free(s);
+    /*endif*/
     return 0;
 }
 /*- End of function --------------------------------------------------------*/
